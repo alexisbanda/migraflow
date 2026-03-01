@@ -8,6 +8,8 @@ import DashboardPage            from '@/pages/dashboard/DashboardPage'
 import NewClientPage            from '@/pages/clients/NewClientPage'
 import CasePage                 from '@/pages/cases/CasePage'
 import ClientPortalPage         from '@/pages/portal/ClientPortalPage'
+import PortalDashboardPage      from '@/pages/portal/PortalDashboardPage'
+import PortalCasePage           from '@/pages/portal/PortalCasePage'
 import SuperAdminDashboardPage  from '@/pages/superadmin/SuperAdminDashboardPage'
 import AgenciesPage             from '@/pages/superadmin/AgenciesPage'
 import SettingsPage             from '@/pages/superadmin/SettingsPage'
@@ -112,7 +114,13 @@ export const router = createBrowserRouter([
   {
     element: <RequireAuth allowedRoles={['client']} />,
     children: [
-      { path: '/portal', element: <ClientPortalPage /> },
+      {
+        element: <ClientPortalPage />,
+        children: [
+          { path: '/portal',                 index: true,    element: <PortalDashboardPage /> },
+          { path: '/portal/caso/:caseId',                    element: <PortalCasePage /> },
+        ],
+      },
     ],
   },
 

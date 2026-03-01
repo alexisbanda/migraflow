@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   doc, collection, onSnapshot, updateDoc, getDoc, query, where, orderBy,
+  arrayUnion, Timestamp,
 } from 'firebase/firestore'
 import {
   ref, uploadBytesResumable, getDownloadURL,
@@ -30,6 +31,16 @@ const TYPE_LABEL = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+async function addTimelineEvent(caseId, event) {
+  try {
+    await updateDoc(doc(db, 'cases', caseId), {
+      timeline: arrayUnion({ event, timestamp: Timestamp.now() }),
+    })
+  } catch (err) {
+    console.error('Failed to add timeline event', err)
+  }
+}
+
 function StatusBadge({ status, meta }) {
   const m = meta[status] ?? meta.pending
   return (
@@ -42,6 +53,37 @@ function StatusBadge({ status, meta }) {
 
 function Skeleton({ className }) {
   return <div className={`bg-slate-800 rounded animate-pulse ${className}`} />
+}
+
+function CaseTimeline({ timeline }) {
+  if (!timeline?.length) return null
+
+  const events = [...timeline].sort((a, b) =>
+    (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0)
+  )
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6">
+      <h3 className="text-sm font-semibold text-slate-100 mb-4">Historial de cambios</h3>
+      <ol className="space-y-3">
+        {events.map((ev, i) => {
+          const date    = ev.timestamp?.toDate?.()
+          const dateStr = date
+            ? date.toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : '—'
+          return (
+            <li key={i} className="flex gap-3 items-start">
+              <span className="w-1.5 h-1.5 rounded-full bg-military-500 mt-1.5 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-slate-300">{ev.event}</p>
+                <p className="text-xs text-slate-600 mt-0.5">{dateStr}</p>
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
 }
 
 // ─── Upload dropzone por requisito ────────────────────────────────────────────
@@ -119,6 +161,7 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
   const handleStatusChange = async (newStatus) => {
     setSaving(true)
     await updateDoc(doc(db, 'cases', caseId, 'requirements', req.id), { status: newStatus })
+    await addTimelineEvent(caseId, `Requisito "${req.name}" → ${STATUS_META[newStatus]?.label ?? newStatus}`)
     setSaving(false)
   }
 
@@ -272,11 +315,21 @@ export default function CasePage() {
   const handleStatusChange = async (newStatus) => {
     setStatusSaving(true)
     await updateDoc(doc(db, 'cases', caseId), { status: newStatus })
+    await addTimelineEvent(caseId, `Estado del expediente → ${CASE_STATUS_LABEL[newStatus]}`)
     setStatusSaving(false)
   }
 
   const handleGeneratePackage = () =>
     generate({ caseId, agencyId: claims?.agencyId })
+
+  // Añadir evento al timeline cuando se genera un paquete correctamente
+  const prevPkgResult = useRef(null)
+  useEffect(() => {
+    if (pkgResult && pkgResult !== prevPkgResult.current) {
+      prevPkgResult.current = pkgResult
+      addTimelineEvent(caseId, `Paquete migratorio generado (${pkgResult.total_docs} docs · ${pkgResult.file_size_mb} MB)`)
+    }
+  }, [pkgResult, caseId])
 
   const validatedCount = reqs.filter((r) => r.status === 'validated').length
   const canGenerate    = isStaff && validatedCount > 0 && !pkgLoading
@@ -351,12 +404,17 @@ export default function CasePage() {
                     onChange={async (e) => {
                       const newId = e.target.value || null
                       const selected = lawyers.find(l => (l.uid ?? l.id) === newId)
+                      const lawyerName = selected ? (selected.profile?.display_name || selected.email) : null
                       setAssigning(true)
                       try {
                         await updateDoc(doc(db, 'cases', caseId), {
                           assigned_lawyer_id: newId,
-                          assigned_lawyer_name: selected ? (selected.profile?.display_name || selected.email) : null,
+                          assigned_lawyer_name: lawyerName,
                         })
+                        const event = newId
+                          ? `Abogado asignado: ${lawyerName}`
+                          : 'Abogado desasignado'
+                        await addTimelineEvent(caseId, event)
                       } catch (err) {
                         console.error('Failed to assign lawyer', err)
                       } finally {
@@ -442,6 +500,11 @@ export default function CasePage() {
           )}
         </div>
       </div>
+
+      {/* Historial de cambios */}
+      {caseData.timeline?.length > 0 && (
+        <CaseTimeline timeline={caseData.timeline} />
+      )}
 
       {/* Magic Button — Generar Paquete Migratorio */}
       {isStaff && (

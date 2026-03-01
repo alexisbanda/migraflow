@@ -25,6 +25,31 @@ const TYPE_LABEL = {
 
 const FILTERS = ['all', 'open', 'in_review', 'approved', 'rejected']
 
+function exportCSV(cases) {
+  const headers = ['ID', 'Cliente', 'Tipo', 'Estado', 'Fecha apertura', 'Abogado asignado']
+  const rows = cases.map((c) => {
+    const date = c.created_at?.toDate?.()?.toLocaleDateString('es-ES') ?? '—'
+    return [
+      c.id,
+      c.client_name ?? 'Cliente',
+      TYPE_LABEL[c.type] ?? c.type,
+      STATUS_META[c.status]?.label ?? c.status,
+      date,
+      c.assigned_lawyer_name ?? '',
+    ]
+  })
+  const csv = [headers, ...rows]
+    .map((row) => row.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `expedientes_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
 
 function StatCard({ label, value, accent }) {
@@ -185,17 +210,33 @@ export default function DashboardPage() {
             {loading ? '...' : `${cases.length} expediente${cases.length !== 1 ? 's' : ''} en total`}
           </p>
         </div>
-        <Link
-          to="/clients/new"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
-                     bg-military-600 hover:bg-military-500 text-white transition-all
-                     shadow-lg shadow-military-900/30"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Nuevo cliente
-        </Link>
+        <div className="flex items-center gap-3">
+          {cases.length > 0 && (
+            <button
+              onClick={() => exportCSV(cases)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium
+                         border border-slate-700 text-slate-400 hover:text-slate-100 hover:border-slate-500
+                         transition-all"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Exportar CSV
+            </button>
+          )}
+          <Link
+            to="/clients/new"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+                       bg-military-600 hover:bg-military-500 text-white transition-all
+                       shadow-lg shadow-military-900/30"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo cliente
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

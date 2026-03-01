@@ -30,6 +30,27 @@ const CASE_TYPES = [
     icon: '👨‍👩‍👧',
     badge: null,
   },
+  {
+    id: 'estancia_estudios',
+    label: 'Estancia por Estudios',
+    description: 'Para estudiantes que ya se encuentran en España o prórrogas de estancia.',
+    icon: '🎓',
+    badge: null,
+  },
+  {
+    id: 'visa_estudios',
+    label: 'Visado de Estudios',
+    description: 'Tramitación inicial de visado desde consulado de origen.',
+    icon: '🛂',
+    badge: null,
+  },
+  {
+    id: 'regularizacion_masiva_2026',
+    label: 'Regularización 2026',
+    description: 'Proceso extraordinario de regularización por arraigo social o laboral.',
+    icon: '⚖️',
+    badge: 'Nuevo',
+  },
 ]
 
 function CaseTypeCard({ type, selected, onSelect }) {

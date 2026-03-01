@@ -55,7 +55,7 @@ export function useAgencies() {
    * Crea una agencia nueva en Firestore.
    * @returns {string} agencyId generado
    */
-  const createAgency = async ({ name, brandColor, adminEmail }) => {
+  const createAgency = async ({ name, brandColor, adminEmail, defaultTemplateId }) => {
     const slug     = nameToSlug(name)
     const agencyId = `${slug}-${Date.now().toString(36)}`
 
@@ -68,6 +68,7 @@ export function useAgencies() {
         notifications_email:   adminEmail || null,
         logo_url:              null,
       },
+      default_template_id: defaultTemplateId || null,
       admin_email_pending: adminEmail || null,
       admin_uid:           null,
       created_at:          serverTimestamp(),

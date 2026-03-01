@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { httpsCallable } from 'firebase/functions'
-import { functions } from '@/lib/firebase'
+import { getDocs, collection } from 'firebase/firestore'
+import { functions, db } from '@/lib/firebase'
 import { useAgencies } from '@/hooks/useAgencies'
 import Button from '@/components/ui/Button'
 import Modal  from '@/components/ui/Modal'
@@ -23,6 +24,7 @@ const agencySchema = z.object({
     .email('Introduce un email válido')
     .or(z.literal(''))
     .optional(),
+  templateId: z.string().optional(),
 })
 
 // ─── Local helpers ────────────────────────────────────────────────────────────
@@ -63,6 +65,13 @@ export default function AgenciesPage() {
   const [detailAgency,    setDetailAgency]    = useState(null)  // agency object
   const [search,          setSearch]          = useState('')
   const [actionLoading,   setActionLoading]   = useState(null)  // agencyId being toggled/plan-changed
+  const [templates,       setTemplates]       = useState([])
+
+  useEffect(() => {
+    getDocs(collection(db, 'global_templates')).then((snap) => {
+      setTemplates(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    }).catch(() => {})
+  }, [])
 
   const {
     register,
@@ -73,7 +82,7 @@ export default function AgenciesPage() {
     setValue,
   } = useForm({
     resolver: zodResolver(agencySchema),
-    defaultValues: { name: '', brandColor: '#4b5320', adminEmail: '' },
+    defaultValues: { name: '', brandColor: '#4b5320', adminEmail: '', templateId: '' },
   })
 
   const brandColorValue = watch('brandColor')
@@ -83,9 +92,10 @@ export default function AgenciesPage() {
 
   const onSubmit = async (data) => {
     const agencyId = await createAgency({
-      name:       data.name,
-      brandColor: data.brandColor,
-      adminEmail: data.adminEmail || '',
+      name:              data.name,
+      brandColor:        data.brandColor,
+      adminEmail:        data.adminEmail || '',
+      defaultTemplateId: data.templateId || null,
     })
 
     // Si se proporcionó email, crear el usuario admin via Cloud Function
@@ -453,6 +463,18 @@ export default function AgenciesPage() {
             />
           </FormField>
 
+          <FormField
+            label="Plantilla por defecto"
+            hint="Opcional — asigna una plantilla de requisitos inicial"
+          >
+            <select {...register('templateId')} className={inputCls(false)}>
+              <option value="">Sin plantilla</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name ?? t.id}</option>
+              ))}
+            </select>
+          </FormField>
+
           <div className="flex gap-2.5 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-xs text-slate-500">
             <svg className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -565,6 +587,11 @@ export default function AgenciesPage() {
                 detailAgency.admin_uid
                   ? <code className="text-xs">{detailAgency.admin_uid.slice(0, 12)}…</code>
                   : <span className="text-amber-600">Pendiente</span>
+              } />
+              <DetailRow label="Plantilla por defecto" value={
+                detailAgency.default_template_id
+                  ? <code className="text-xs">{detailAgency.default_template_id}</code>
+                  : <span className="text-slate-400">—</span>
               } />
             </div>
           </div>
