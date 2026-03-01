@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Ruta: /{agencyId}/{clientId}/{caseId}/{reqId}/{filename}
+    match /{agencyId}/{clientId}/{caseId}/{reqId}/{filename} {
+
+      // Lectura: agency_admin y lawyer de la misma agencia
+      allow read: if request.auth != null
+                  && (request.auth.token.agencyId == agencyId)
+                  && request.auth.token.role in ['agency_admin', 'lawyer'];
+
+      // Escritura: cliente que pertenece al clientId o staff de la agencia
+      allow write: if request.auth != null
+                   && (
+                     request.auth.uid == clientId
+                     || (request.auth.token.agencyId == agencyId
+                         && request.auth.token.role in ['agency_admin', 'lawyer'])
+                   )
+                   && request.resource.size < 15 * 1024 * 1024   // < 15 MB
+                   && request.resource.contentType.matches('application/pdf|image/.*');
+    }
+  }
+}

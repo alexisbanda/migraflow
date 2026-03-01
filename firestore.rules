@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function role()     { return request.auth.token.role; }
+    function agency()   { return request.auth.token.agencyId; }
+    function isAuthed() { return request.auth != null; }
+
+    function isSuperAdmin()   { return isAuthed() && role() == 'superadmin'; }
+    function isAgencyAdmin()  { return isAuthed() && role() == 'agency_admin'; }
+    function isLawyer()       { return isAuthed() && role() == 'lawyer'; }
+    function isClient()       { return isAuthed() && role() == 'client'; }
+
+    function sameAgency(doc)  { return doc.data.agencyId == agency(); }
+    function assignedToCase() {
+      return request.auth.uid == resource.data.assigned_lawyer_id;
+    }
+
+    // ── /agencies ─────────────────────────────────────────────────────────────
+    match /agencies/{agencyId} {
+      allow read:  if isSuperAdmin() || (isAgencyAdmin() && agency() == agencyId);
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /users ────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read:  if isSuperAdmin()
+                   || (isAuthed() && (request.auth.uid == uid || isAgencyAdmin()));
+      allow write: if isSuperAdmin()
+                   || (isAgencyAdmin() && agency() == resource.data.agencyId);
+    }
+
+    // ── /clients ──────────────────────────────────────────────────────────────
+    // SuperAdmin NO puede leer datos de clientes (RGPD)
+    match /clients/{clientId} {
+      allow read:  if (isAgencyAdmin() && sameAgency(resource))
+                   || (isLawyer()      && sameAgency(resource))
+                   || (isClient()      && request.auth.uid == resource.data.userId);
+      allow create: if isAgencyAdmin() && request.resource.data.agencyId == agency();
+      allow update: if (isAgencyAdmin() && sameAgency(resource))
+                   || (isLawyer()       && sameAgency(resource));
+      allow delete: if isAgencyAdmin() && sameAgency(resource);
+    }
+
+    // ── /cases ────────────────────────────────────────────────────────────────
+    match /cases/{caseId} {
+      allow read:  if (isAgencyAdmin() && sameAgency(resource))
+                   || (isLawyer()      && sameAgency(resource) && assignedToCase())
+                   || (isClient()      && resource.data.clientId == request.auth.uid);
+
+      allow create: if (isAgencyAdmin() || isLawyer())
+                    && request.resource.data.agencyId == agency();
+
+      allow update: if (isAgencyAdmin() && sameAgency(resource))
+                   || (isLawyer()       && sameAgency(resource) && assignedToCase());
+
+      // Nadie borra expedientes (archivado lógico via status)
+      allow delete: if false;
+
+      // ── /cases/{caseId}/requirements ─────────────────────────────────────
+      match /requirements/{reqId} {
+        allow read:  if (isAgencyAdmin() && get(/databases/$(database)/documents/cases/$(caseId)).data.agencyId == agency())
+                     || (isLawyer()      && get(/databases/$(database)/documents/cases/$(caseId)).data.agencyId == agency())
+                     || (isClient()      && get(/databases/$(database)/documents/cases/$(caseId)).data.clientId == request.auth.uid);
+
+        // Cliente solo puede subir si el requisito está en pending o rejected
+        allow create, update: if isClient()
+                              && (resource == null || resource.data.status in ['pending', 'rejected'])
+                              && get(/databases/$(database)/documents/cases/$(caseId)).data.clientId == request.auth.uid;
+
+        allow update: if isAgencyAdmin()
+                     || (isLawyer() && get(/databases/$(database)/documents/cases/$(caseId)).data.agencyId == agency());
+
+        allow delete: if false;
+      }
+    }
+
+    // ── /global_templates ─────────────────────────────────────────────────────
+    match /global_templates/{templateId} {
+      allow read:  if isAuthed();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /settings ─────────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read:  if isAuthed();
+      allow write: if isSuperAdmin();
+    }
+  }
+}
