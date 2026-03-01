@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   doc, collection, onSnapshot, updateDoc, getDoc, query, where, orderBy,
-  arrayUnion, Timestamp,
+  arrayUnion, Timestamp, addDoc, serverTimestamp,
 } from 'firebase/firestore'
 import {
   ref, uploadBytesResumable, getDownloadURL,
@@ -27,6 +27,11 @@ const REQ_STATUS_OPTIONS  = ['pending', 'reviewing', 'validated', 'rejected']
 const TYPE_LABEL = {
   nomada_digital: 'Visa Nómada Digital', residencia_no_lucrativa: 'No Lucrativa',
   cuenta_ajena: 'Cuenta Ajena', reagrupacion_familiar: 'Reagrupación Familiar',
+}
+const INTERNAL_ROLES = {
+  lead_lawyer: 'Abogado principal',
+  paralegal:   'Paralegal',
+  partner:     'Socio',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,6 +60,8 @@ function Skeleton({ className }) {
   return <div className={`bg-slate-800 rounded animate-pulse ${className}`} />
 }
 
+// ─── CaseTimeline (sidebar) ───────────────────────────────────────────────────
+
 function CaseTimeline({ timeline }) {
   if (!timeline?.length) return null
 
@@ -63,25 +70,243 @@ function CaseTimeline({ timeline }) {
   )
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6">
-      <h3 className="text-sm font-semibold text-slate-100 mb-4">Historial de cambios</h3>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <h3 className="text-sm font-semibold text-slate-100 mb-4">Historial</h3>
       <ol className="space-y-3">
         {events.map((ev, i) => {
           const date    = ev.timestamp?.toDate?.()
           const dateStr = date
-            ? date.toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            ? date.toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
             : '—'
           return (
             <li key={i} className="flex gap-3 items-start">
               <span className="w-1.5 h-1.5 rounded-full bg-military-500 mt-1.5 flex-shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-slate-300">{ev.event}</p>
+                <p className="text-xs text-slate-300 leading-snug">{ev.event}</p>
                 <p className="text-xs text-slate-600 mt-0.5">{dateStr}</p>
               </div>
             </li>
           )
         })}
       </ol>
+    </div>
+  )
+}
+
+// ─── TeamWidget ───────────────────────────────────────────────────────────────
+
+function TeamWidget({ caseData, caseId, lawyers, isAdmin }) {
+  const [adding,  setAdding]  = useState(false)
+  const [newUid,  setNewUid]  = useState('')
+  const [newRole, setNewRole] = useState('paralegal')
+  const [saving,  setSaving]  = useState(false)
+
+  const assignees = caseData.assignees ?? []
+  const available = lawyers.filter((l) => !assignees.some((a) => a.uid === (l.uid ?? l.id)))
+
+  const handleAdd = async () => {
+    if (!newUid || saving) return
+    const selected = lawyers.find((l) => (l.uid ?? l.id) === newUid)
+    if (!selected) return
+    const entry = {
+      uid:           newUid,
+      internal_role: newRole,
+      name:          selected.profile?.display_name || selected.email,
+    }
+    const updated = [...assignees, entry]
+    setSaving(true)
+    try {
+      await updateDoc(doc(db, 'cases', caseId), {
+        assignees:     updated,
+        assignee_uids: updated.map((a) => a.uid),
+      })
+      await addTimelineEvent(caseId, `${INTERNAL_ROLES[newRole]} añadido: ${entry.name}`)
+      setNewUid('')
+      setAdding(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRemove = async (uid) => {
+    const removed = assignees.find((a) => a.uid === uid)
+    const updated = assignees.filter((a) => a.uid !== uid)
+    await updateDoc(doc(db, 'cases', caseId), {
+      assignees:     updated,
+      assignee_uids: updated.map((a) => a.uid),
+    })
+    await addTimelineEvent(caseId, `${removed?.name ?? uid} eliminado del equipo`)
+  }
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-slate-100">Equipo</h3>
+        {isAdmin && (
+          <button
+            onClick={() => setAdding((v) => !v)}
+            className="text-xs text-military-400 hover:text-military-300 transition-colors"
+          >
+            {adding ? 'Cancelar' : '+ Añadir'}
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {assignees.length === 0 && (
+          <p className="text-xs text-slate-600">Sin equipo asignado.</p>
+        )}
+        {assignees.map((a) => (
+          <div key={a.uid} className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-300 font-semibold flex-shrink-0">
+              {(a.name ?? 'U')[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-slate-200 font-medium truncate">{a.name}</p>
+              <p className="text-xs text-slate-500">{INTERNAL_ROLES[a.internal_role] ?? a.internal_role}</p>
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => handleRemove(a.uid)}
+                className="text-slate-700 hover:text-red-400 transition-colors text-xs"
+                title="Eliminar del equipo"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {adding && isAdmin && (
+        <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+          <select
+            value={newUid}
+            onChange={(e) => setNewUid(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-military-600"
+          >
+            <option value="">Seleccionar persona...</option>
+            {available.map((l) => (
+              <option key={l.id} value={l.uid ?? l.id}>
+                {l.profile?.display_name || l.email}
+              </option>
+            ))}
+          </select>
+          <select
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-military-600"
+          >
+            {Object.entries(INTERNAL_ROLES).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleAdd}
+            disabled={!newUid || saving}
+            className="w-full py-1.5 rounded-lg text-xs font-semibold bg-military-700 hover:bg-military-600 text-white transition-all disabled:opacity-40"
+          >
+            {saving ? 'Añadiendo...' : 'Añadir al equipo'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── InternalNotesTab ─────────────────────────────────────────────────────────
+
+function InternalNotesTab({ caseId, user }) {
+  const [notes,   setNotes]   = useState([])
+  const [text,    setText]    = useState('')
+  const [posting, setPosting] = useState(false)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'cases', caseId, 'internal_notes'),
+      orderBy('created_at', 'asc'),
+    )
+    const unsub = onSnapshot(q, (snap) => {
+      setNotes(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    })
+    return unsub
+  }, [caseId])
+
+  const handlePost = async () => {
+    if (!text.trim() || posting) return
+    setPosting(true)
+    try {
+      await addDoc(collection(db, 'cases', caseId, 'internal_notes'), {
+        author_uid:  user.uid,
+        author_name: user.displayName || user.email,
+        content:     text.trim(),
+        created_at:  serverTimestamp(),
+        attachments: [],
+      })
+      setText('')
+    } catch (err) {
+      console.error('Failed to post note', err)
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col">
+      <div className="overflow-y-auto space-y-4 mb-5 max-h-96 pr-1">
+        {notes.length === 0 && (
+          <p className="text-center text-xs text-slate-600 py-10">
+            Sin notas internas. Solo el equipo del despacho puede leer esto.
+          </p>
+        )}
+        {notes.map((note) => {
+          const isOwn   = note.author_uid === user?.uid
+          const date    = note.created_at?.toDate?.()
+          const dateStr = date
+            ? date.toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+            : '—'
+          return (
+            <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : ''}`}>
+              <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-300 font-semibold flex-shrink-0">
+                {(note.author_name ?? 'U')[0].toUpperCase()}
+              </div>
+              <div className={`max-w-sm flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                <div
+                  className={`rounded-2xl px-4 py-2.5 ${
+                    isOwn
+                      ? 'bg-military-800/50 border border-military-700/40 rounded-tr-sm'
+                      : 'bg-slate-800 border border-slate-700 rounded-tl-sm'
+                  }`}
+                >
+                  <p className="text-xs text-slate-100 leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                </div>
+                <p className="text-xs text-slate-600 mt-1 px-1">{note.author_name} · {dateStr}</p>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="flex gap-2 pt-4 border-t border-slate-800">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handlePost() }}
+          placeholder="Nota interna... (Ctrl+Enter para enviar)"
+          rows={2}
+          className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-military-600 resize-none"
+        />
+        <button
+          onClick={handlePost}
+          disabled={!text.trim() || posting}
+          className="px-4 rounded-xl bg-military-700 hover:bg-military-600 text-white text-xs font-semibold transition-all disabled:opacity-40 self-end py-2"
+        >
+          Enviar
+        </button>
+      </div>
     </div>
   )
 }
@@ -106,9 +331,9 @@ function ReqDropzone({ req, caseId, agencyId, clientId, onUploaded }) {
         const url = await getDownloadURL(uploadTask.snapshot.ref)
         const reqRef = doc(db, 'cases', caseId, 'requirements', req.id)
         await updateDoc(reqRef, {
-          file_url:    url,
+          file_url:     url,
           storage_path: storagePath,
-          status:      'reviewing',
+          status:       'reviewing',
         })
         setProgress(null)
         onUploaded?.()
@@ -153,8 +378,8 @@ function ReqDropzone({ req, caseId, agencyId, clientId, onUploaded }) {
 // ─── Fila de requisito ────────────────────────────────────────────────────────
 
 function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
-  const [open, setOpen]       = useState(false)
-  const [saving, setSaving]   = useState(false)
+  const [open,   setOpen]   = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const canUpload = ['pending', 'rejected'].includes(req.status)
 
@@ -167,7 +392,6 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
 
   return (
     <div className="border border-slate-800 rounded-xl overflow-hidden">
-      {/* Header fila */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-slate-800/40 transition-colors"
@@ -183,11 +407,8 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
         </svg>
       </button>
 
-      {/* Panel expandible */}
       {open && (
         <div className="px-4 pb-4 pt-1 border-t border-slate-800 bg-slate-900/50 space-y-3">
-
-          {/* AI warnings */}
           {req.ai_warnings?.length > 0 && (
             <div className="space-y-1.5">
               {req.ai_warnings.map((w, i) => (
@@ -202,7 +423,6 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
             </div>
           )}
 
-          {/* Ver archivo subido */}
           {req.file_url && (
             <a
               href={req.file_url}
@@ -218,7 +438,6 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
             </a>
           )}
 
-          {/* Upload — solo si está pending o rejected */}
           {canUpload && (
             <ReqDropzone
               req={req}
@@ -229,7 +448,6 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
             />
           )}
 
-          {/* Cambiar estado — solo staff */}
           {isStaff && (
             <div className="flex flex-wrap gap-2 pt-1">
               <span className="text-xs text-slate-500 self-center">Cambiar estado:</span>
@@ -257,18 +475,19 @@ function RequirementRow({ req, caseId, agencyId, clientId, isStaff }) {
 
 export default function CasePage() {
   const { caseId }     = useParams()
-  const { claims }     = useAuth()
+  const { user, claims } = useAuth()
   const { generate, loading: pkgLoading, result: pkgResult, error: pkgError } = useGeneratePackage()
 
-  const [caseData,  setCaseData]  = useState(null)
-  const [clientData, setClientData] = useState(null)
-  const [reqs,      setReqs]      = useState([])
-  const [loading,   setLoading]   = useState(true)
+  const [activeTab,    setActiveTab]    = useState('checklist')
+  const [caseData,     setCaseData]     = useState(null)
+  const [clientData,   setClientData]   = useState(null)
+  const [reqs,         setReqs]         = useState([])
+  const [loading,      setLoading]      = useState(true)
   const [statusSaving, setStatusSaving] = useState(false)
-  const [lawyers, setLawyers] = useState([])
-  const [assigning, setAssigning] = useState(false)
+  const [lawyers,      setLawyers]      = useState([])
 
   const isStaff = ['agency_admin', 'lawyer'].includes(claims?.role)
+  const isAdmin = claims?.role === 'agency_admin'
 
   // Listener expediente
   useEffect(() => {
@@ -276,7 +495,6 @@ export default function CasePage() {
       if (!snap.exists()) { setLoading(false); return }
       const data = { id: snap.id, ...snap.data() }
       setCaseData(data)
-      // Cargar datos del cliente
       if (data.clientId) {
         const clientSnap = await getDoc(doc(db, 'clients', data.clientId))
         if (clientSnap.exists()) setClientData(clientSnap.data())
@@ -297,7 +515,7 @@ export default function CasePage() {
     return unsub
   }, [caseId])
 
-  // Lista de abogados de la agencia (agency_admin puede asignar)
+  // Lista de abogados de la agencia (para TeamWidget)
   useEffect(() => {
     if (!claims?.agencyId) return
     const q = query(
@@ -307,7 +525,7 @@ export default function CasePage() {
       orderBy('created_at', 'asc'),
     )
     const unsub = onSnapshot(q, (snap) => {
-      setLawyers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setLawyers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
     })
     return unsub
   }, [claims?.agencyId])
@@ -322,7 +540,6 @@ export default function CasePage() {
   const handleGeneratePackage = () =>
     generate({ caseId, agencyId: claims?.agencyId })
 
-  // Añadir evento al timeline cuando se genera un paquete correctamente
   const prevPkgResult = useRef(null)
   useEffect(() => {
     if (pkgResult && pkgResult !== prevPkgResult.current) {
@@ -336,7 +553,7 @@ export default function CasePage() {
 
   if (loading) {
     return (
-      <div className="p-8 max-w-3xl mx-auto space-y-4">
+      <div className="p-8 max-w-5xl mx-auto space-y-4">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-4 w-32" />
         <div className="mt-6 space-y-3">
@@ -362,8 +579,13 @@ export default function CasePage() {
   const createdAt   = caseData.created_at?.toDate?.()
   const dateStr     = createdAt?.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) ?? '—'
 
+  const tabs = [
+    { id: 'checklist', label: 'Checklist' },
+    ...(isStaff ? [{ id: 'notes', label: 'Notas internas' }] : []),
+  ]
+
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-8 max-w-5xl mx-auto">
 
       {/* Breadcrumb */}
       <Link to="/dashboard" className="text-xs text-slate-500 hover:text-slate-300 transition-colors mb-6 inline-block">
@@ -381,61 +603,17 @@ export default function CasePage() {
             <p className="text-xs text-slate-500 mt-1">Abierto el {dateStr}</p>
           </div>
 
-          {/* Estado del expediente */}
           {isStaff ? (
-            <div className="flex items-center gap-3">
-              <select
-                value={caseData.status}
-                disabled={statusSaving}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-military-600 disabled:opacity-50 cursor-pointer"
-              >
-                {CASE_STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>{CASE_STATUS_LABEL[s]}</option>
-                ))}
-              </select>
-
-              {/* Asignar abogado (solo agency_admin) */}
-              {claims?.role === 'agency_admin' ? (
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Asignar abogado</label>
-                  <select
-                    value={caseData.assigned_lawyer_id ?? ''}
-                    onChange={async (e) => {
-                      const newId = e.target.value || null
-                      const selected = lawyers.find(l => (l.uid ?? l.id) === newId)
-                      const lawyerName = selected ? (selected.profile?.display_name || selected.email) : null
-                      setAssigning(true)
-                      try {
-                        await updateDoc(doc(db, 'cases', caseId), {
-                          assigned_lawyer_id: newId,
-                          assigned_lawyer_name: lawyerName,
-                        })
-                        const event = newId
-                          ? `Abogado asignado: ${lawyerName}`
-                          : 'Abogado desasignado'
-                        await addTimelineEvent(caseId, event)
-                      } catch (err) {
-                        console.error('Failed to assign lawyer', err)
-                      } finally {
-                        setAssigning(false)
-                      }
-                    }}
-                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1 text-sm text-slate-200"
-                  >
-                    <option value="">Sin asignar</option>
-                    {lawyers.map((l) => (
-                      <option key={l.id} value={l.uid ?? l.id}>{l.profile?.display_name || l.email}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Abogado asignado</label>
-                  <div className="text-sm text-slate-200">{caseData.assigned_lawyer_name || caseData.assigned_lawyer_id || '—'}</div>
-                </div>
-              )}
-            </div>
+            <select
+              value={caseData.status}
+              disabled={statusSaving}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-military-600 disabled:opacity-50 cursor-pointer"
+            >
+              {CASE_STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{CASE_STATUS_LABEL[s]}</option>
+              ))}
+            </select>
           ) : (
             <StatusBadge status={caseData.status} meta={
               Object.fromEntries(CASE_STATUS_OPTIONS.map((s) => [s, {
@@ -447,7 +625,6 @@ export default function CasePage() {
           )}
         </div>
 
-        {/* Datos del cliente */}
         {clientData && (
           <div className="mt-5 pt-5 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-3 gap-4">
             {[
@@ -466,127 +643,167 @@ export default function CasePage() {
         )}
       </div>
 
-      {/* Checklist de requisitos */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-slate-300">
-            Documentación requerida
-            <span className="ml-2 text-slate-500 font-normal">
-              {validatedCount}/{reqs.length} validados
-            </span>
-          </h2>
-          {/* Barra de progreso */}
-          <div className="w-32 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-military-600 rounded-full transition-all duration-500"
-              style={{ width: reqs.length ? `${(validatedCount / reqs.length) * 100}%` : '0%' }}
-            />
+      {/* Two-column layout */}
+      <div className="flex gap-6 items-start">
+
+        {/* ── Main content ── */}
+        <div className="flex-1 min-w-0">
+
+          {/* Tab bar */}
+          <div className="flex border-b border-slate-800 mb-6">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-military-500 text-military-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        </div>
 
-        <div className="space-y-2">
-          {reqs.map((req) => (
-            <RequirementRow
-              key={req.id}
-              req={req}
-              caseId={caseId}
-              agencyId={caseData.agencyId}
-              clientId={caseData.clientId}
-              isStaff={isStaff}
-            />
-          ))}
-          {reqs.length === 0 && (
-            <p className="text-center text-slate-600 text-sm py-8">No hay requisitos definidos.</p>
-          )}
-        </div>
-      </div>
-
-      {/* Historial de cambios */}
-      {caseData.timeline?.length > 0 && (
-        <CaseTimeline timeline={caseData.timeline} />
-      )}
-
-      {/* Magic Button — Generar Paquete Migratorio */}
-      {isStaff && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+          {/* ── Tab: Checklist ── */}
+          {activeTab === 'checklist' && (
             <div>
-              <h3 className="text-sm font-semibold text-slate-100">Paquete Migratorio</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Genera un PDF único con todos los documentos validados, listo para presentar.
-                {validatedCount === 0 && ' Necesitas al menos 1 documento validado.'}
-              </p>
-            </div>
-            <button
-              onClick={handleGeneratePackage}
-              disabled={!canGenerate}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold
-                         bg-military-600 hover:bg-military-500 text-white transition-all
-                         disabled:opacity-40 disabled:cursor-not-allowed
-                         shadow-lg shadow-military-900/30"
-            >
-              {pkgLoading ? (
-                <>
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  Generando...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Generar paquete ({validatedCount} docs)
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Resultado */}
-          {pkgResult && (
-            <div className="mt-4 flex items-center justify-between bg-military-900/30 border border-military-800/60 rounded-xl px-4 py-3">
-              <div>
-                <p className="text-xs text-military-300 font-medium">✓ Paquete generado correctamente</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {pkgResult.total_docs} documentos · {pkgResult.file_size_mb} MB
-                </p>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-slate-300">
+                  Documentación requerida
+                  <span className="ml-2 text-slate-500 font-normal">
+                    {validatedCount}/{reqs.length} validados
+                  </span>
+                </h2>
+                <div className="w-32 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-military-600 rounded-full transition-all duration-500"
+                    style={{ width: reqs.length ? `${(validatedCount / reqs.length) * 100}%` : '0%' }}
+                  />
+                </div>
               </div>
-              <a
-                href={pkgResult.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-military-400 hover:text-military-300 font-medium underline underline-offset-2"
-              >
-                Descargar PDF
-              </a>
+
+              <div className="space-y-2">
+                {reqs.map((req) => (
+                  <RequirementRow
+                    key={req.id}
+                    req={req}
+                    caseId={caseId}
+                    agencyId={caseData.agencyId}
+                    clientId={caseData.clientId}
+                    isStaff={isStaff}
+                  />
+                ))}
+                {reqs.length === 0 && (
+                  <p className="text-center text-slate-600 text-sm py-8">No hay requisitos definidos.</p>
+                )}
+              </div>
+
+              {/* Magic Button */}
+              {isStaff && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-100">Paquete Migratorio</h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Genera un PDF único con todos los documentos validados, listo para presentar.
+                        {validatedCount === 0 && ' Necesitas al menos 1 documento validado.'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleGeneratePackage}
+                      disabled={!canGenerate}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold
+                                 bg-military-600 hover:bg-military-500 text-white transition-all
+                                 disabled:opacity-40 disabled:cursor-not-allowed
+                                 shadow-lg shadow-military-900/30"
+                    >
+                      {pkgLoading ? (
+                        <>
+                          <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                          </svg>
+                          Generando...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Generar paquete ({validatedCount} docs)
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {pkgResult && (
+                    <div className="mt-4 flex items-center justify-between bg-military-900/30 border border-military-800/60 rounded-xl px-4 py-3">
+                      <div>
+                        <p className="text-xs text-military-300 font-medium">✓ Paquete generado correctamente</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {pkgResult.total_docs} documentos · {pkgResult.file_size_mb} MB
+                        </p>
+                      </div>
+                      <a
+                        href={pkgResult.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-military-400 hover:text-military-300 font-medium underline underline-offset-2"
+                      >
+                        Descargar PDF
+                      </a>
+                    </div>
+                  )}
+
+                  {pkgError && (
+                    <div className="mt-4 bg-red-950/30 border border-red-900/40 rounded-xl px-4 py-3">
+                      <p className="text-xs text-red-400">{pkgError}</p>
+                    </div>
+                  )}
+
+                  {!pkgResult && caseData.last_package?.file_url && (
+                    <div className="mt-4 flex items-center justify-between border-t border-slate-800 pt-4">
+                      <p className="text-xs text-slate-500">Último paquete generado</p>
+                      <a
+                        href={caseData.last_package.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2"
+                      >
+                        Descargar · {caseData.last_package.file_size_mb} MB
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {pkgError && (
-            <div className="mt-4 bg-red-950/30 border border-red-900/40 rounded-xl px-4 py-3">
-              <p className="text-xs text-red-400">{pkgError}</p>
-            </div>
-          )}
-
-          {/* Último paquete guardado */}
-          {!pkgResult && caseData.last_package?.file_url && (
-            <div className="mt-4 flex items-center justify-between border-t border-slate-800 pt-4">
-              <p className="text-xs text-slate-500">Último paquete generado</p>
-              <a
-                href={caseData.last_package.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2"
-              >
-                Descargar · {caseData.last_package.file_size_mb} MB
-              </a>
-            </div>
+          {/* ── Tab: Notas Internas ── */}
+          {activeTab === 'notes' && isStaff && (
+            <InternalNotesTab caseId={caseId} user={user} />
           )}
         </div>
-      )}
+
+        {/* ── Sidebar ── */}
+        <div className="w-72 flex-shrink-0 space-y-4">
+          {isStaff && (
+            <TeamWidget
+              caseData={caseData}
+              caseId={caseId}
+              lawyers={lawyers}
+              isAdmin={isAdmin}
+            />
+          )}
+          {caseData.timeline?.length > 0 && (
+            <CaseTimeline timeline={caseData.timeline} />
+          )}
+        </div>
+
+      </div>
     </div>
   )
 }

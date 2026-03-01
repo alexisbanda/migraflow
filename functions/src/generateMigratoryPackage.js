@@ -151,10 +151,13 @@ exports.generateMigratoryPackage = onCall(
       throwFn('permission-denied', 'El expediente no pertenece a tu agencia.')
     }
 
-    // Lawyer: solo puede empaquetar si está asignado al caso
-    if (request.auth.token.role === 'lawyer' &&
-        caseData.assigned_lawyer_id !== request.auth.uid) {
-      throwFn('permission-denied', 'No estás asignado a este expediente.')
+    // Lawyer: solo puede empaquetar si está asignado al caso.
+    // Soporta tanto assignee_uids (Fase 6) como el legacy assigned_lawyer_id.
+    if (request.auth.token.role === 'lawyer') {
+      const isAssigned =
+        caseData.assigned_lawyer_id === request.auth.uid ||
+        (caseData.assignee_uids ?? []).includes(request.auth.uid)
+      if (!isAssigned) throwFn('permission-denied', 'No estás asignado a este expediente.')
     }
 
     // 3. Obtener requirements validados ordenados por merge_order
@@ -265,6 +268,23 @@ exports.generateMigratoryPackage = onCall(
     })
 
     console.log(`[Package] Paquete generado: ${packagePath} (${fileSizeMb} MB)`)
+
+    // Audit log — best-effort, nunca bloquea el resultado
+    try {
+      await db
+        .collection('agencies').doc(callerAgency)
+        .collection('audit_logs')
+        .add({
+          user_uid:    request.auth.uid,
+          action:      'GENERATE_PACKAGE',
+          target_type: 'case',
+          target_id:   caseId,
+          metadata:    { file_size_mb: fileSizeMb, total_docs: requirements.length - downloadErrors.length },
+          timestamp:   FieldValue.serverTimestamp(),
+        })
+    } catch (auditErr) {
+      console.warn('[Package] Failed to write audit log:', auditErr.message)
+    }
 
     return {
       status:       'success',
