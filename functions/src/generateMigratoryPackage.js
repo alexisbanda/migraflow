@@ -1,23 +1,3 @@
-/**
- * generateMigratoryPackage — "Magic Button"
- * ─────────────────────────────────────────────────────────────────────────────
- * Trigger : onCall (llamada desde React por un lawyer o agency_admin)
- *
- * Input payload: { caseId: string, agencyId: string }
- *
- * Flujo:
- *  1. Verifica autenticación y rol (lawyer | agency_admin).
- *  2. Verifica que el agencyId del token coincide con el del expediente (RGPD).
- *  3. Lee todos los requirements en estado "validated", ordenados por merge_order.
- *  4. Descarga cada PDF desde Storage a /tmp.
- *  5. Une los PDFs con pdf-lib respetando merge_order.
- *  6. Añade una portada minimalista con metadata del expediente.
- *  7. Sube el PDF final a Storage: /{agencyId}/{caseId}/package/package_{timestamp}.pdf
- *  8. Actualiza /cases/{caseId} con la URL del paquete y timestamp.
- *
- * Output: { status: "success", file_url: string, file_size_mb: number, total_docs: number }
- */
-
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
 const { FieldValue }         = require('firebase-admin/firestore')
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib')
@@ -26,6 +6,7 @@ const { assertRole, throwFn } = require('./lib/errors')
 const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
+const archiver = require('archiver')
 
 const MAX_SIZE_BYTES = 15 * 1024 * 1024  // 15 MB
 
@@ -116,6 +97,42 @@ async function insertCoverPage(mergedPdf, meta) {
   })
 }
 
+/**
+ * Crea un PDF unificado para un cliente específico.
+ * @param {Array} requirements 
+ * @param {Object} meta 
+ * @param {string} bucketName 
+ * @returns {Promise<Buffer>}
+ */
+async function generateClientPdf(requirements, meta, bucketName) {
+  const mergedPdf = await PDFDocument.create()
+  const downloadErrors = []
+
+  for (const req of requirements) {
+    if (!req.file_url || !req.storage_path) continue
+    try {
+      const pdfBytes = await downloadToBuffer(req.storage_path, bucketName)
+      const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true })
+      const srcPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices())
+      srcPages.forEach((p) => mergedPdf.addPage(p))
+    } catch (err) {
+      console.error(`[Package] Error req ${req.id}: ${err.message}`)
+      downloadErrors.push(req.name ?? req.id)
+    }
+  }
+
+  if (mergedPdf.getPageCount() === 0) return null
+
+  await insertCoverPage(mergedPdf, {
+    clientName:  meta.clientName,
+    caseType:    meta.caseType,
+    totalDocs:   requirements.length - downloadErrors.length,
+    generatedAt: new Date(),
+  })
+
+  return Buffer.from(await mergedPdf.save())
+}
+
 // ─── Función principal ────────────────────────────────────────────────────────
 
 exports.generateMigratoryPackage = onCall(
@@ -127,171 +144,150 @@ exports.generateMigratoryPackage = onCall(
   async (request) => {
     // 1. Verificar autenticación y rol
     const { agencyId: callerAgency } = assertRole(request, ['agency_admin', 'lawyer'])
-
     const { caseId, agencyId: requestedAgencyId } = request.data ?? {}
 
-    if (!caseId || !requestedAgencyId) {
-      throwFn('invalid-argument', 'Se requieren caseId y agencyId.')
-    }
+    if (!caseId || !requestedAgencyId) throwFn('invalid-argument', 'Faltan parámetros.')
+    if (callerAgency !== requestedAgencyId) throwFn('permission-denied', 'Sin permisos.')
 
-    // El llamante solo puede operar sobre expedientes de su propia agencia
-    if (callerAgency !== requestedAgencyId) {
-      throwFn('permission-denied', 'No tienes permisos sobre esta agencia.')
-    }
-
-    // 2. Leer el expediente
+    // 2. Leer expediente y beneficiarios
     const caseRef  = db.collection('cases').doc(caseId)
     const caseSnap = await caseRef.get()
-
-    if (!caseSnap.exists) throwFn('not-found', `Expediente ${caseId} no encontrado.`)
-
+    if (!caseSnap.exists) throwFn('not-found', 'Expediente no encontrado.')
     const caseData = caseSnap.data()
 
-    if (caseData.agencyId !== callerAgency) {
-      throwFn('permission-denied', 'El expediente no pertenece a tu agencia.')
+    // Map names: id -> name
+    const clientMap = {}
+    
+    // Titular
+    const titularSnap = await db.collection('clients').doc(caseData.clientId).get()
+    const tpd = titularSnap.data()?.personal_data ?? {}
+    const titularName = `${tpd.first_name ?? ''} ${tpd.last_name ?? ''}`.trim() || 'Titular'
+    clientMap[caseData.clientId] = titularName
+
+    // Beneficiarios
+    for (const ben of (caseData.beneficiaries || [])) {
+      clientMap[ben.clientId] = ben.name || 'Beneficiario'
     }
 
-    // Lawyer: solo puede empaquetar si está asignado al caso.
-    // Soporta tanto assignee_uids (Fase 6) como el legacy assigned_lawyer_id.
-    if (request.auth.token.role === 'lawyer') {
-      const isAssigned =
-        caseData.assigned_lawyer_id === request.auth.uid ||
-        (caseData.assignee_uids ?? []).includes(request.auth.uid)
-      if (!isAssigned) throwFn('permission-denied', 'No estás asignado a este expediente.')
-    }
-
-    // 3. Obtener requirements validados ordenados por merge_order
-    const reqsSnap = await db
-      .collection('cases')
-      .doc(caseId)
-      .collection('requirements')
+    // 3. Obtener requirements validados
+    const reqsSnap = await caseRef.collection('requirements')
       .where('status', '==', 'validated')
       .orderBy('merge_order', 'asc')
       .get()
 
-    if (reqsSnap.empty) {
-      throwFn('failed-precondition', 'No hay documentos validados para empaquetar.')
-    }
+    if (reqsSnap.empty) throwFn('failed-precondition', 'No hay documentos validados.')
 
-    const requirements = reqsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    console.log(`[Package] ${requirements.length} documentos validados para caseId=${caseId}`)
-
-    // 4 & 5. Descargar PDFs y unirlos con pdf-lib
-    const bucketName = storage.bucket().name
-    const mergedPdf  = await PDFDocument.create()
-
-    const downloadErrors = []
-
-    for (const req of requirements) {
-      if (!req.file_url) {
-        console.warn(`[Package] req ${req.id} no tiene file_url. Omitido.`)
-        continue
-      }
-
-      try {
-        // La file_url es una URL pública o un gs:// path.
-        // Guardamos el gs:// path en Firestore como storage_path para uso interno.
-        const storagePath = req.storage_path   // e.g. agencyId/clientId/caseId/reqId/doc.pdf
-        const pdfBytes    = await downloadToBuffer(storagePath, bucketName)
-
-        const srcDoc  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true })
-        const srcPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices())
-        srcPages.forEach((p) => mergedPdf.addPage(p))
-
-        console.log(`[Package] ✓ ${req.name} (${srcDoc.getPageCount()} páginas)`)
-      } catch (err) {
-        console.error(`[Package] Error al procesar req ${req.id}: ${err.message}`)
-        downloadErrors.push(req.name ?? req.id)
-      }
-    }
-
-    if (mergedPdf.getPageCount() === 0) {
-      throwFn('internal', 'No se pudo cargar ningún PDF. Verifica los archivos subidos.')
-    }
-
-    // 6. Insertar portada
-    // Leer el nombre del cliente
-    let clientName = 'Cliente'
-    try {
-      const clientSnap = await db.collection('clients').doc(caseData.clientId).get()
-      const pd = clientSnap.data()?.personal_data ?? {}
-      clientName = `${pd.first_name ?? ''} ${pd.last_name ?? ''}`.trim() || 'Cliente'
-    } catch (_) { /* no bloqueamos si falla */ }
-
-    await insertCoverPage(mergedPdf, {
-      clientName,
-      caseType:   caseData.type,
-      totalDocs:  requirements.length - downloadErrors.length,
-      generatedAt: new Date(),
+    const requirements = reqsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+    
+    // 4. Agrupar por cliente
+    const groups = {}
+    requirements.forEach(req => {
+      const cid = req.belongs_to_client_id || caseData.clientId
+      if (!groups[cid]) groups[cid] = []
+      groups[cid].push(req)
     })
 
-    // 7. Serializar y verificar tamaño
-    const finalBytes = await mergedPdf.save()
+    const bucketName = storage.bucket().name
+    const clientsInCase = Object.keys(groups)
+    const isMulti = clientsInCase.length > 1
+    const timestamp = Date.now()
 
-    if (finalBytes.byteLength > MAX_SIZE_BYTES) {
-      console.warn(`[Package] PDF excede 15 MB (${(finalBytes.byteLength / 1024 / 1024).toFixed(2)} MB). Comprimiendo...`)
-      // pdf-lib no comprime imágenes; el aviso queda en logs para revisión manual.
-      // En producción se podría pasar por Ghostscript vía exec, pero añade complejidad.
+    let finalBuffer
+    let fileType = 'pdf'
+    let packagePath
+
+    if (!isMulti) {
+      // Un solo cliente: PDF directo
+      const cid = clientsInCase[0]
+      finalBuffer = await generateClientPdf(groups[cid], { 
+        clientName: clientMap[cid] || titularName, 
+        caseType: caseData.type 
+      }, bucketName)
+      
+      if (!finalBuffer) throwFn('internal', 'Error generando PDF.')
+      packagePath = `${callerAgency}/${caseId}/package/package_${timestamp}.pdf`
+    } else {
+      // Varios clientes: Generar ZIP
+      fileType = 'zip'
+      packagePath = `${callerAgency}/${caseId}/package/package_${timestamp}.zip`
+      
+      const zipPath = path.join(os.tmpdir(), `migraflow_${timestamp}.zip`)
+      const output = fs.createWriteStream(zipPath)
+      const archive = archiver('zip', { zlib: { level: 9 } })
+
+      const zipPromise = new Promise((resolve, reject) => {
+        output.on('close', resolve)
+        archive.on('error', reject)
+      })
+
+      archive.pipe(output)
+
+      for (const cid of clientsInCase) {
+        const clientPdf = await generateClientPdf(groups[cid], { 
+          clientName: clientMap[cid], 
+          caseType: caseData.type 
+        }, bucketName)
+        
+        if (clientPdf) {
+          const safeName = (clientMap[cid] || cid).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+          archive.append(clientPdf, { name: `Expediente_${safeName}.pdf` })
+        }
+      }
+
+      await archive.finalize()
+      await zipPromise
+      finalBuffer = fs.readFileSync(zipPath)
+      fs.unlinkSync(zipPath)
     }
 
-    // 8. Subir a Storage
-    const timestamp   = Date.now()
-    const packagePath = `${callerAgency}/${caseId}/package/package_${timestamp}.pdf`
-    const fileRef     = storage.bucket(bucketName).file(packagePath)
-
-    await fileRef.save(Buffer.from(finalBytes), {
+    // 5. Subir a Storage
+    const fileRef = storage.bucket(bucketName).file(packagePath)
+    await fileRef.save(finalBuffer, {
       metadata: {
-        contentType:  'application/pdf',
+        contentType: fileType === 'zip' ? 'application/zip' : 'application/pdf',
         cacheControl: 'private, max-age=3600',
       },
     })
 
-    // URL firmada válida 7 días (más segura que URL pública)
     const [signedUrl] = await fileRef.getSignedUrl({
-      action:  'read',
+      action: 'read',
       expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
     })
 
-    const fileSizeMb = parseFloat((finalBytes.byteLength / 1024 / 1024).toFixed(2))
+    const fileSizeMb = parseFloat((finalBuffer.byteLength / 1024 / 1024).toFixed(2))
 
-    // 9. Actualizar el expediente en Firestore
-    await caseRef.update({
-      last_package: {
-        file_url:      signedUrl,
-        storage_path:  packagePath,
-        file_size_mb:  fileSizeMb,
-        total_docs:    requirements.length - downloadErrors.length,
-        generated_at:  FieldValue.serverTimestamp(),
-        generated_by:  request.auth.uid,
-        download_errors: downloadErrors,
-      },
-    })
-
-    console.log(`[Package] Paquete generado: ${packagePath} (${fileSizeMb} MB)`)
-
-    // Audit log — best-effort, nunca bloquea el resultado
-    try {
-      await db
-        .collection('agencies').doc(callerAgency)
-        .collection('audit_logs')
-        .add({
-          user_uid:    request.auth.uid,
-          action:      'GENERATE_PACKAGE',
-          target_type: 'case',
-          target_id:   caseId,
-          metadata:    { file_size_mb: fileSizeMb, total_docs: requirements.length - downloadErrors.length },
-          timestamp:   FieldValue.serverTimestamp(),
-        })
-    } catch (auditErr) {
-      console.warn('[Package] Failed to write audit log:', auditErr.message)
+    // 6. Actualizar Firestore
+    const packageInfo = {
+      file_url:      signedUrl,
+      file_type:     fileType,
+      storage_path:  packagePath,
+      file_size_mb:  fileSizeMb,
+      total_docs:    requirements.length,
+      generated_at:  FieldValue.serverTimestamp(),
+      generated_by:  request.auth.uid,
     }
 
+    await caseRef.update({ last_package: packageInfo })
+
+    // Audit Log
+    try {
+      await db.collection('agencies').doc(callerAgency).collection('audit_logs').add({
+        user_uid: request.auth.uid,
+        action: 'GENERATE_PACKAGE',
+        target_type: 'case',
+        target_id: caseId,
+        metadata: { file_size_mb: fileSizeMb, total_docs: requirements.length, file_type: fileType },
+        timestamp: FieldValue.serverTimestamp(),
+      })
+    } catch (e) { console.warn('[Audit] Fail:', e.message) }
+
     return {
-      status:       'success',
-      file_url:     signedUrl,
+      status: 'success',
+      file_url: signedUrl,
+      file_type: fileType,
       file_size_mb: fileSizeMb,
-      total_docs:   requirements.length - downloadErrors.length,
-      ...(downloadErrors.length > 0 && { skipped_docs: downloadErrors }),
+      total_docs: requirements.length,
     }
   }
 )
+

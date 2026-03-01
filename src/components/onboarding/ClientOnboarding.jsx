@@ -150,6 +150,7 @@ function Progress() {
   const labels = {
     personal: 'Datos personales',
     passport: 'Pasaporte',
+    family: 'Familiar / Individual',
     case_type: 'Tipo de expediente',
   }
 

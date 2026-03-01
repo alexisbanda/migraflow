@@ -34,7 +34,11 @@ const templateSchema = z.object({
   case_type:                 z.string().min(1, 'Introduce el tipo de expediente'),
   estimated_resolution_days: z.number({ invalid_type_error: 'Introduce un número' })
                                .int().min(1).max(730),
-  requirements_blueprint:    z.array(reqSchema),
+  requirements_blueprint:    z.object({
+    titular: z.array(reqSchema),
+    spouse:  z.array(reqSchema),
+    child:   z.array(reqSchema),
+  }),
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,25 +67,68 @@ const BLANK_REQ = () => ({
   },
 })
 
+function mapReqsToForm(reqs) {
+  return (reqs ?? []).map((req) => ({
+    reqId:               req.id ?? '',
+    name:                req.name ?? '',
+    type:                req.type ?? 'client_upload',
+    client_instructions: req.client_instructions ?? '',
+    is_mandatory:        req.is_mandatory ?? true,
+    ai_rules: {
+      max_age_months:             req.ai_rules?.max_age_months ?? null,
+      requires_apostille:         req.ai_rules?.requires_apostille ?? false,
+      requires_sworn_translation: req.ai_rules?.requires_sworn_translation ?? false,
+      required_keywords:          (req.ai_rules?.required_keywords ?? []).join(', '),
+    },
+  }))
+}
+
 function toFormValues(tpl) {
+  const rb = tpl.requirements_blueprint ?? {}
+  
+  // Backward compatibility: if requirements_blueprint is an array, put it in 'titular'
+  if (Array.isArray(rb)) {
+    return {
+      name:                      tpl.name ?? '',
+      case_type:                 tpl.case_type ?? '',
+      estimated_resolution_days: tpl.estimated_resolution_days ?? 30,
+      requirements_blueprint: {
+        titular: mapReqsToForm(rb),
+        spouse:  [],
+        child:   [],
+      },
+    }
+  }
+
   return {
     name:                      tpl.name ?? '',
     case_type:                 tpl.case_type ?? '',
     estimated_resolution_days: tpl.estimated_resolution_days ?? 30,
-    requirements_blueprint: (tpl.requirements_blueprint ?? []).map((req) => ({
-      reqId:               req.id ?? '',
-      name:                req.name ?? '',
-      type:                req.type ?? 'client_upload',
-      client_instructions: req.client_instructions ?? '',
-      is_mandatory:        req.is_mandatory ?? true,
-      ai_rules: {
-        max_age_months:             req.ai_rules?.max_age_months ?? null,
-        requires_apostille:         req.ai_rules?.requires_apostille ?? false,
-        requires_sworn_translation: req.ai_rules?.requires_sworn_translation ?? false,
-        required_keywords:          (req.ai_rules?.required_keywords ?? []).join(', '),
-      },
-    })),
+    requirements_blueprint: {
+      titular: mapReqsToForm(rb.titular),
+      spouse:  mapReqsToForm(rb.spouse),
+      child:   mapReqsToForm(rb.child),
+    },
   }
+}
+
+function mapReqsToFirestore(reqs) {
+  return (reqs ?? []).map((req, i) => ({
+    id:                  req.reqId || `req-${Date.now()}-${i}`,
+    name:                req.name,
+    type:                req.type,
+    client_instructions: req.client_instructions,
+    is_mandatory:        req.is_mandatory,
+    merge_order:         i + 1,
+    ai_rules: {
+      max_age_months:             req.ai_rules.max_age_months || null,
+      requires_apostille:         req.ai_rules.requires_apostille,
+      requires_sworn_translation: req.ai_rules.requires_sworn_translation,
+      required_keywords: req.ai_rules.required_keywords
+        ? req.ai_rules.required_keywords.split(',').map((k) => k.trim()).filter(Boolean)
+        : [],
+    },
+  }))
 }
 
 function toFirestoreData(formData) {
@@ -89,22 +136,11 @@ function toFirestoreData(formData) {
     name:                      formData.name,
     case_type:                 formData.case_type,
     estimated_resolution_days: formData.estimated_resolution_days,
-    requirements_blueprint: formData.requirements_blueprint.map((req, i) => ({
-      id:                  req.reqId || `req-${Date.now()}-${i}`,
-      name:                req.name,
-      type:                req.type,
-      client_instructions: req.client_instructions,
-      is_mandatory:        req.is_mandatory,
-      merge_order:         i + 1,
-      ai_rules: {
-        max_age_months:             req.ai_rules.max_age_months || null,
-        requires_apostille:         req.ai_rules.requires_apostille,
-        requires_sworn_translation: req.ai_rules.requires_sworn_translation,
-        required_keywords: req.ai_rules.required_keywords
-          ? req.ai_rules.required_keywords.split(',').map((k) => k.trim()).filter(Boolean)
-          : [],
-      },
-    })),
+    requirements_blueprint: {
+      titular: mapReqsToFirestore(formData.requirements_blueprint.titular),
+      spouse:  mapReqsToFirestore(formData.requirements_blueprint.spouse),
+      child:   mapReqsToFirestore(formData.requirements_blueprint.child),
+    },
     updated_at: serverTimestamp(),
   }
 }
@@ -141,13 +177,14 @@ const inputCls = (err) =>
    ${err ? 'border-red-400 bg-red-50/30' : 'border-slate-300'}`
 
 function RequirementCard({
-  index, control, register, watch, errors,
+  role, index, control, register, watch, errors,
   isFirst, isLast, expanded,
   onToggleExpand, onRemove, onMoveUp, onMoveDown,
 }) {
-  const name = watch(`requirements_blueprint.${index}.name`)
-  const type = watch(`requirements_blueprint.${index}.type`)
-  const reqErr = errors?.requirements_blueprint?.[index]
+  const basePath = `requirements_blueprint.${role}.${index}`
+  const name = watch(`${basePath}.name`)
+  const type = watch(`${basePath}.type`)
+  const reqErr = errors?.requirements_blueprint?.[role]?.[index]
 
   return (
     <div className={`rounded-xl border bg-white overflow-hidden transition-shadow
@@ -233,7 +270,7 @@ function RequirementCard({
                 Nombre del requisito <span className="text-red-500">*</span>
               </label>
               <input
-                {...register(`requirements_blueprint.${index}.name`)}
+                {...register(`${basePath}.name`)}
                 type="text"
                 placeholder="ej. Pasaporte vigente (copia completa)"
                 className={inputCls(!!reqErr?.name)}
@@ -244,7 +281,7 @@ function RequirementCard({
             <div className="space-y-1.5 min-w-[180px]">
               <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Tipo</label>
               <select
-                {...register(`requirements_blueprint.${index}.type`)}
+                {...register(`${basePath}.type`)}
                 className={inputCls(false)}
               >
                 <option value="client_upload">Subida por cliente</option>
@@ -259,7 +296,7 @@ function RequirementCard({
               <div className="pt-2">
                 <Controller
                   control={control}
-                  name={`requirements_blueprint.${index}.is_mandatory`}
+                  name={`${basePath}.is_mandatory`}
                   render={({ field }) => (
                     <Toggle checked={field.value} onChange={field.onChange} />
                   )}
@@ -274,7 +311,7 @@ function RequirementCard({
               Instrucciones para el cliente
             </label>
             <textarea
-              {...register(`requirements_blueprint.${index}.client_instructions`)}
+              {...register(`${basePath}.client_instructions`)}
               rows={2}
               placeholder="ej. Sube una copia escaneada de todas las páginas del pasaporte, incluyendo la hoja de datos."
               className={`${inputCls(false)} resize-none leading-relaxed`}
@@ -300,7 +337,7 @@ function RequirementCard({
                 <div className="flex items-center gap-2">
                   <Controller
                     control={control}
-                    name={`requirements_blueprint.${index}.ai_rules.max_age_months`}
+                    name={`${basePath}.ai_rules.max_age_months`}
                     render={({ field }) => (
                       <input
                         type="number"
@@ -325,7 +362,7 @@ function RequirementCard({
                   Palabras clave requeridas <span className="text-slate-400">(separadas por coma)</span>
                 </label>
                 <input
-                  {...register(`requirements_blueprint.${index}.ai_rules.required_keywords`)}
+                  {...register(`${basePath}.ai_rules.required_keywords`)}
                   type="text"
                   placeholder="ej. apostilla, pasaporte, seguro"
                   className={inputCls(false)}
@@ -338,7 +375,7 @@ function RequirementCard({
               <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                 <input
                   type="checkbox"
-                  {...register(`requirements_blueprint.${index}.ai_rules.requires_apostille`)}
+                  {...register(`${basePath}.ai_rules.requires_apostille`)}
                   className="w-4 h-4 rounded border-slate-300 text-military-600
                              focus:ring-military-500 accent-military-600 cursor-pointer"
                 />
@@ -349,7 +386,7 @@ function RequirementCard({
               <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                 <input
                   type="checkbox"
-                  {...register(`requirements_blueprint.${index}.ai_rules.requires_sworn_translation`)}
+                  {...register(`${basePath}.ai_rules.requires_sworn_translation`)}
                   className="w-4 h-4 rounded border-slate-300 text-military-600
                              focus:ring-military-500 accent-military-600 cursor-pointer"
                 />
@@ -399,7 +436,11 @@ const BLANK_FORM = {
   name: '',
   case_type: '',
   estimated_resolution_days: 30,
-  requirements_blueprint: [],
+  requirements_blueprint: {
+    titular: [],
+    spouse:  [],
+    child:   [],
+  },
 }
 
 const CASE_TYPE_SUGGESTIONS = [
@@ -412,12 +453,31 @@ const CASE_TYPE_SUGGESTIONS = [
   'renovacion_residencia',
 ]
 
+const ROLES = [
+  { id: 'titular', label: 'Titular', icon: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+    </svg>
+  )},
+  { id: 'spouse', label: 'Cónyuge', icon: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+    </svg>
+  )},
+  { id: 'child', label: 'Dependiente', icon: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  )},
+]
+
 export default function TemplateBuilderPage() {
   const [templates,      setTemplates]      = useState([])
   const [loadingList,    setLoadingList]     = useState(true)
   const [selectedId,     setSelectedId]      = useState(null)
   const [isNew,          setIsNew]           = useState(false)
   const [expandedIdx,    setExpandedIdx]     = useState(null)
+  const [activeRole,     setActiveRole]      = useState('titular')
   const [deleteConfirm,  setDeleteConfirm]   = useState(null)   // template to confirm delete
   const [saveError,      setSaveError]       = useState(null)
 
@@ -449,10 +509,18 @@ export default function TemplateBuilderPage() {
     defaultValues: BLANK_FORM,
   })
 
-  const { fields, append, remove, move } = useFieldArray({
-    control,
-    name: 'requirements_blueprint',
-  })
+  // We need three useFieldArray instances
+  const titularFA = useFieldArray({ control, name: 'requirements_blueprint.titular' })
+  const spouseFA  = useFieldArray({ control, name: 'requirements_blueprint.spouse' })
+  const childFA   = useFieldArray({ control, name: 'requirements_blueprint.child' })
+
+  const getActiveFA = () => {
+    if (activeRole === 'titular') return titularFA
+    if (activeRole === 'spouse')  return spouseFA
+    return childFA
+  }
+
+  const { fields, append, remove, move } = getActiveFA()
 
   // ── Selection ─────────────────────────────────────────────────────────────
   const confirmDirty = () => {
@@ -466,6 +534,7 @@ export default function TemplateBuilderPage() {
     setSelectedId(tpl.id)
     setIsNew(false)
     setExpandedIdx(null)
+    setActiveRole('titular')
     reset(toFormValues(tpl))
     setSaveError(null)
   }
@@ -475,6 +544,7 @@ export default function TemplateBuilderPage() {
     setSelectedId(null)
     setIsNew(true)
     setExpandedIdx(null)
+    setActiveRole('titular')
     reset(BLANK_FORM)
     setSaveError(null)
   }
@@ -572,6 +642,11 @@ export default function TemplateBuilderPage() {
 
           {!loadingList && templates.map((tpl) => {
             const active = tpl.id === selectedId
+            const rb = tpl.requirements_blueprint ?? {}
+            const totalReqs = Array.isArray(rb) 
+              ? rb.length 
+              : (rb.titular?.length ?? 0) + (rb.spouse?.length ?? 0) + (rb.child?.length ?? 0)
+
             return (
               <div key={tpl.id} className="relative group">
                 <button
@@ -588,7 +663,7 @@ export default function TemplateBuilderPage() {
                   <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
                     <code className="text-[10px] text-slate-400">{tpl.case_type}</code>
                     <span>·</span>
-                    <span>{tpl.requirements_blueprint?.length ?? 0} reqs</span>
+                    <span>{totalReqs} reqs</span>
                     {tpl.estimated_resolution_days && (
                       <>
                         <span>·</span>
@@ -754,17 +829,14 @@ export default function TemplateBuilderPage() {
               </section>
 
               {/* ── Requirements builder ── */}
-              <section className="space-y-3">
+              <section className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-slate-700">
                       Requisitos documentales
-                      <span className="ml-2 text-xs font-normal text-slate-400">
-                        ({fields.length})
-                      </span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      El orden determina el orden de montaje del PDF final.
+                      Configura los documentos requeridos por cada rol.
                     </p>
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={appendReq}>
@@ -775,11 +847,46 @@ export default function TemplateBuilderPage() {
                   </Button>
                 </div>
 
+                {/* Role Tabs */}
+                <div className="flex gap-1 bg-slate-200/50 p-1 rounded-xl w-fit">
+                  {ROLES.map((r) => {
+                    const active = activeRole === r.id
+                    const count = watch(`requirements_blueprint.${r.id}`)?.length ?? 0
+                    const hasError = !!errors.requirements_blueprint?.[r.id]
+                    
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveRole(r.id)
+                          setExpandedIdx(null)
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all
+                                    ${active 
+                                      ? 'bg-white text-military-700 shadow-sm' 
+                                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+                      >
+                        {r.icon}
+                        {r.label}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full 
+                                          ${active ? 'bg-military-100 text-military-700' : 'bg-slate-200 text-slate-500'}`}>
+                          {count}
+                        </span>
+                        {hasError && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                      </button>
+                    )
+                  })}
+                </div>
+
                 {fields.length === 0 && (
                   <div className="bg-white rounded-2xl border border-dashed border-slate-300
                                   px-6 py-10 text-center">
                     <p className="text-sm text-slate-400">
-                      No hay requisitos. Pulsa «Añadir requisito» para comenzar.
+                      No hay requisitos para el rol <strong className="text-slate-600">{ROLES.find(r => r.id === activeRole)?.label}</strong>.
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Pulsa «Añadir requisito» para comenzar.
                     </p>
                   </div>
                 )}
@@ -788,6 +895,7 @@ export default function TemplateBuilderPage() {
                   {fields.map((field, index) => (
                     <RequirementCard
                       key={field.id}
+                      role={activeRole}
                       index={index}
                       control={control}
                       register={register}

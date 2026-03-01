@@ -668,7 +668,7 @@ export default function CasePage() {
 
           {/* ── Tab: Checklist ── */}
           {activeTab === 'checklist' && (
-            <div>
+            <div className="space-y-8">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-slate-300">
                   Documentación requerida
@@ -684,21 +684,47 @@ export default function CasePage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {reqs.map((req) => (
-                  <RequirementRow
-                    key={req.id}
-                    req={req}
-                    caseId={caseId}
-                    agencyId={caseData.agencyId}
-                    clientId={caseData.clientId}
-                    isStaff={isStaff}
-                  />
-                ))}
-                {reqs.length === 0 && (
-                  <p className="text-center text-slate-600 text-sm py-8">No hay requisitos definidos.</p>
-                )}
-              </div>
+              {/* Grouped Requirements */}
+              {[
+                { id: caseData.clientId, name: clientName, role: 'Titular' },
+                ...(caseData.beneficiaries || []).map(b => ({ id: b.clientId, name: b.name, role: b.relationship === 'spouse' ? 'Cónyuge' : 'Dependiente' }))
+              ].map((client) => {
+                const clientReqs = reqs.filter(r => {
+                  // Si no tiene el campo, asumimos que es del titular para compatibilidad
+                  const ownerId = r.belongs_to_client_id || caseData.clientId
+                  return ownerId === client.id
+                })
+                if (clientReqs.length === 0) return null
+
+                return (
+                  <div key={client.id} className="space-y-3">
+                    <div className="flex items-center gap-2 px-1">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                        Documentos de {client.name}
+                      </h3>
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-500 font-bold uppercase">
+                        {client.role}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {clientReqs.map((req) => (
+                        <RequirementRow
+                          key={req.id}
+                          req={req}
+                          caseId={caseId}
+                          agencyId={caseData.agencyId}
+                          clientId={client.id}
+                          isStaff={isStaff}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {reqs.length === 0 && (
+                <p className="text-center text-slate-600 text-sm py-8">No hay requisitos definidos.</p>
+              )}
 
               {/* Magic Button */}
               {isStaff && (
@@ -753,7 +779,7 @@ export default function CasePage() {
                         rel="noopener noreferrer"
                         className="text-xs text-military-400 hover:text-military-300 font-medium underline underline-offset-2"
                       >
-                        Descargar PDF
+                        Descargar Paquete ({pkgResult.file_type?.toUpperCase() || 'PDF'})
                       </a>
                     </div>
                   )}

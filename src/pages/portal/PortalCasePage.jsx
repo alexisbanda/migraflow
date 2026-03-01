@@ -395,7 +395,7 @@ function PackageSection({ pkg }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-slate-100">Paquete de documentación</p>
         <p className="text-xs text-slate-500 mt-0.5">
-          {[date, sizeLabel].filter(Boolean).join(' · ')}
+          {[date, sizeLabel, pkg.file_type?.toUpperCase()].filter(Boolean).join(' · ')}
         </p>
       </div>
       <a
@@ -411,7 +411,7 @@ function PackageSection({ pkg }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
-        Descargar
+        Descargar {pkg.file_type?.toUpperCase() || 'PDF'}
       </a>
     </div>
   )
@@ -623,16 +623,41 @@ export default function PortalCasePage() {
             No hay documentos requeridos aún.
           </p>
         ) : (
-          <div className="space-y-2">
-            {reqs.map((req) => (
-              <RequirementCard
-                key={req.id}
-                req={req}
-                caseId={caseDoc.id}
-                agencyId={caseDoc.agencyId}
-                clientId={clientDoc?.id}
-              />
-            ))}
+          <div className="space-y-8">
+            {[
+              { id: caseDoc.clientId, name: `${clientDoc?.personal_data?.first_name || ''} ${clientDoc?.personal_data?.last_name || ''}`.trim() || 'Titular', role: 'Titular' },
+              ...(caseDoc.beneficiaries || []).map(b => ({ id: b.clientId, name: b.name, role: b.relationship === 'spouse' ? 'Cónyuge' : 'Dependiente' }))
+            ].map((client) => {
+              const clientReqs = reqs.filter(r => {
+                const ownerId = r.belongs_to_client_id || caseDoc.clientId
+                return ownerId === client.id
+              })
+              if (clientReqs.length === 0) return null
+
+              return (
+                <div key={client.id} className="space-y-3">
+                  <div className="flex items-center gap-2 px-1">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                      Documentos de {client.name}
+                    </h3>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-500 font-bold uppercase">
+                      {client.role}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {clientReqs.map((req) => (
+                      <RequirementCard
+                        key={req.id}
+                        req={req}
+                        caseId={caseDoc.id}
+                        agencyId={caseDoc.agencyId}
+                        clientId={client.id}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </section>
