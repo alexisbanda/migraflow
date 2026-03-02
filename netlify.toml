@@ -1,0 +1,16 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Opcional: Si no puedes cambiar el tipo de variable en la UI, 
+# puedes intentar desactivar el escaneo de secretos añadiendo esto 
+# a tus variables de entorno en la UI de Netlify:
+# NETLIFY_SKIP_SECRET_SCANNING = "true"
