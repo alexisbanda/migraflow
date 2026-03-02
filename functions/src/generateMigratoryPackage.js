@@ -155,10 +155,16 @@ exports.generateMigratoryPackage = onCall(
     if (!caseSnap.exists) throwFn('not-found', 'Expediente no encontrado.')
     const caseData = caseSnap.data()
 
-    // Map names: id -> name
-    const clientMap = {}
-    
-    // Titular
+    // 2.5 Validar deuda financiera
+    const billingSnap = await caseRef.collection('billing').limit(1).get()
+    if (!billingSnap.empty) {
+      const billing = billingSnap.docs[0].data()
+      if (billing.payment_status === 'debt' && billing.block_generation_on_debt !== false) {
+        throwFn('failed-precondition', 'Generación bloqueada por deuda pendiente. Registra el pago para continuar.')
+      }
+    }
+
+    // 3. Leer clientes (Titular + Beneficiarios)
     const titularSnap = await db.collection('clients').doc(caseData.clientId).get()
     const tpd = titularSnap.data()?.personal_data ?? {}
     const titularName = `${tpd.first_name ?? ''} ${tpd.last_name ?? ''}`.trim() || 'Titular'

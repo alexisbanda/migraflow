@@ -11,6 +11,8 @@ import { useDropzone } from 'react-dropzone'
 import { db, storage } from '@/lib/firebase'
 import { useAuth } from '@/context/AuthContext'
 import { useGeneratePackage } from '@/hooks/useGeneratePackage'
+import { useBilling } from '@/hooks/useBilling'
+import BillingTab from './BillingTab'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
