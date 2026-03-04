@@ -165,6 +165,7 @@ exports.generateMigratoryPackage = onCall(
     }
 
     // 3. Leer clientes (Titular + Beneficiarios)
+    const clientMap = {}
     const titularSnap = await db.collection('clients').doc(caseData.clientId).get()
     const tpd = titularSnap.data()?.personal_data ?? {}
     const titularName = `${tpd.first_name ?? ''} ${tpd.last_name ?? ''}`.trim() || 'Titular'

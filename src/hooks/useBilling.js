@@ -12,9 +12,6 @@ export function useBilling(caseId) {
   useEffect(() => {
     if (!caseId) return
 
-    // 1. Billing summary listener
-    // Note: We use the first doc of a subcollection for flexibility, 
-    // or a single doc if we prefer. Given the README, /billing/{id}
     const billingRef = collection(db, 'cases', caseId, 'billing')
     const unsubBilling = onSnapshot(billingRef, (snap) => {
       if (!snap.empty) {
@@ -25,7 +22,6 @@ export function useBilling(caseId) {
       setLoading(false)
     })
 
-    // 2. Milestones listener
     const milestonesRef = query(
       collection(db, 'cases', caseId, 'billing_milestones'),
       orderBy('due_date', 'asc')
@@ -40,23 +36,33 @@ export function useBilling(caseId) {
     }
   }, [caseId])
 
+  // Denormaliza billing_status al doc del expediente para queries del dashboard
+  const syncCaseStatus = async (status) => {
+    await updateDoc(doc(db, 'cases', caseId), { billing_status: status })
+  }
+
   const initBilling = async (data) => {
     const billingRef = collection(db, 'cases', caseId, 'billing')
-    const newDoc = doc(billingRef)
-    await setDoc(newDoc, {
+    const newDocRef = doc(billingRef)
+    const status = data.payment_status || 'pending'
+    await setDoc(newDocRef, {
       total_amount: data.total_amount || 0,
       paid_amount: 0,
       currency: data.currency || 'EUR',
-      payment_status: 'pending',
+      payment_status: status,
       block_generation_on_debt: true,
       created_at: serverTimestamp(),
-      ...data
+      ...data,
     })
+    await syncCaseStatus(status)
   }
 
   const updateBilling = async (billingId, data) => {
     const docRef = doc(db, 'cases', caseId, 'billing', billingId)
     await updateDoc(docRef, data)
+    if (data.payment_status !== undefined) {
+      await syncCaseStatus(data.payment_status)
+    }
   }
 
   const addMilestone = async (data) => {
@@ -64,25 +70,24 @@ export function useBilling(caseId) {
     await addDoc(milestonesRef, {
       ...data,
       status: data.status || 'pending',
-      created_at: serverTimestamp()
+      created_at: serverTimestamp(),
     })
   }
 
   const recordPayment = async (milestoneId, amount) => {
-    // 1. Update milestone
     const mRef = doc(db, 'cases', caseId, 'billing_milestones', milestoneId)
     await updateDoc(mRef, {
       status: 'paid',
-      paid_at: serverTimestamp()
+      paid_at: serverTimestamp(),
     })
 
-    // 2. Update billing summary
     if (billing) {
       const newPaid = (billing.paid_amount || 0) + amount
       const isFull = newPaid >= billing.total_amount
+      const newStatus = isFull ? 'paid' : 'partial'
       await updateBilling(billing.id, {
         paid_amount: newPaid,
-        payment_status: isFull ? 'paid' : 'partial'
+        payment_status: newStatus,
       })
     }
   }
@@ -94,6 +99,6 @@ export function useBilling(caseId) {
     initBilling,
     updateBilling,
     addMilestone,
-    recordPayment
+    recordPayment,
   }
 }

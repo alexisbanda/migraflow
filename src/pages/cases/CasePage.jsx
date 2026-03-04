@@ -488,8 +488,11 @@ export default function CasePage() {
   const [statusSaving, setStatusSaving] = useState(false)
   const [lawyers,      setLawyers]      = useState([])
 
+  const { billing } = useBilling(caseId)
+
   const isStaff = ['agency_admin', 'lawyer'].includes(claims?.role)
   const isAdmin = claims?.role === 'agency_admin'
+  const isBlocked = billing?.payment_status === 'debt' && billing?.block_generation_on_debt !== false
 
   // Listener expediente
   useEffect(() => {
@@ -551,7 +554,7 @@ export default function CasePage() {
   }, [pkgResult, caseId])
 
   const validatedCount = reqs.filter((r) => r.status === 'validated').length
-  const canGenerate    = isStaff && validatedCount > 0 && !pkgLoading
+  const canGenerate    = isStaff && validatedCount > 0 && !pkgLoading && !isBlocked
 
   if (loading) {
     return (
@@ -583,7 +586,10 @@ export default function CasePage() {
 
   const tabs = [
     { id: 'checklist', label: 'Checklist' },
-    ...(isStaff ? [{ id: 'notes', label: 'Notas internas' }] : []),
+    ...(isStaff ? [
+      { id: 'notes', label: 'Notas internas' },
+      { id: 'billing', label: 'Facturación' },
+    ] : []),
   ]
 
   return (
@@ -731,6 +737,19 @@ export default function CasePage() {
               {/* Magic Button */}
               {isStaff && (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mt-6">
+                  {isBlocked && (
+                    <div className="flex items-start gap-3 bg-red-950/20 border border-red-900/40 rounded-xl px-4 py-3 mb-5">
+                      <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      <div>
+                        <p className="text-xs font-bold text-red-400 uppercase tracking-tight">Generación bloqueada por deuda</p>
+                        <p className="text-[11px] text-red-300/70 mt-0.5 leading-relaxed">
+                          Registra el pago en la pestaña <strong className="text-red-300">Facturación</strong> para desbloquear.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div>
                       <h3 className="text-sm font-semibold text-slate-100">Paquete Migratorio</h3>
@@ -754,6 +773,13 @@ export default function CasePage() {
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                           </svg>
                           Generando...
+                        </>
+                      ) : isBlocked ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          Bloqueado
                         </>
                       ) : (
                         <>
@@ -813,6 +839,11 @@ export default function CasePage() {
           {/* ── Tab: Notas Internas ── */}
           {activeTab === 'notes' && isStaff && (
             <InternalNotesTab caseId={caseId} user={user} />
+          )}
+
+          {/* ── Tab: Facturación ── */}
+          {activeTab === 'billing' && isStaff && (
+            <BillingTab caseId={caseId} isStaff={isStaff} />
           )}
         </div>
 
