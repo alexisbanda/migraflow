@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MigraFlow — Pitch Deck</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#080c18;--bg2:#0f172a;--surface:#1e293b;--surface2:#334155;
+--text:#f1f5f9;--text2:#94a3b8;--accent:#6b7a2e;--accent-light:#8fa33e;
+--accent-glow:rgba(107,122,46,0.3);--gradient:linear-gradient(135deg,#4b5320,#8fa33e);
+--red:#ef4444;--blue:#3b82f6;--purple:#8b5cf6;--cyan:#06b6d4;
+}
+html{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);scroll-behavior:smooth}
+body{overflow:hidden;height:100vh;width:100vw}
+
+/* SLIDE ENGINE */
+.deck{position:relative;width:100vw;height:100vh;overflow:hidden}
+.slide{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  opacity:0;transform:translateX(60px);transition:opacity .6s ease,transform .6s ease;
+  pointer-events:none;padding:60px 80px;z-index:0}
+.slide.active{opacity:1;transform:translateX(0);pointer-events:auto;z-index:2}
+.slide.prev{opacity:0;transform:translateX(-60px)}
+
+/* NAV */
+.nav{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:100}
+.nav-dot{width:10px;height:10px;border-radius:50%;background:var(--surface2);border:none;cursor:pointer;transition:.3s}
+.nav-dot.active{background:var(--accent-light);box-shadow:0 0 12px var(--accent-glow);width:28px;border-radius:5px}
+.nav-arrows{position:fixed;bottom:28px;right:40px;display:flex;gap:8px;z-index:100}
+.nav-arrows button{width:40px;height:40px;border-radius:10px;border:1px solid var(--surface2);
+  background:var(--surface);color:var(--text);font-size:18px;cursor:pointer;transition:.2s;display:flex;align-items:center;justify-content:center}
+.nav-arrows button:hover{background:var(--accent);border-color:var(--accent)}
+.slide-counter{position:fixed;bottom:34px;left:40px;color:var(--text2);font-size:13px;font-weight:500;z-index:100;letter-spacing:1px}
+
+/* BACKGROUNDS */
+.bg-grid{position:absolute;inset:0;background-image:
+  linear-gradient(rgba(139,92,246,.03) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(139,92,246,.03) 1px,transparent 1px);
+  background-size:60px 60px;pointer-events:none}
+.bg-glow{position:absolute;width:500px;height:500px;border-radius:50%;filter:blur(120px);opacity:.15;pointer-events:none}
+.bg-glow.g1{background:#4b5320;top:-100px;right:-100px}
+.bg-glow.g2{background:#8b5cf6;bottom:-200px;left:-100px}
+.bg-glow.g3{background:#3b82f6;top:50%;left:50%;transform:translate(-50%,-50%)}
+
+/* TYPOGRAPHY */
+h1{font-size:clamp(2.5rem,5vw,4.2rem);font-weight:800;line-height:1.1;letter-spacing:-1.5px}
+h2{font-size:clamp(2rem,3.5vw,3rem);font-weight:700;line-height:1.15;letter-spacing:-1px}
+h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
+.subtitle{font-size:1.2rem;color:var(--text2);line-height:1.6;max-width:600px;font-weight:300}
+.tag{display:inline-block;padding:6px 16px;border-radius:20px;font-size:.75rem;font-weight:600;
+  letter-spacing:1.5px;text-transform:uppercase}
+.tag-accent{background:rgba(75,83,32,.25);color:var(--accent-light);border:1px solid rgba(143,163,62,.3)}
+.tag-purple{background:rgba(139,92,246,.15);color:#a78bfa;border:1px solid rgba(139,92,246,.3)}
+.highlight{color:var(--accent-light)}
+.gradient-text{background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+
+/* LAYOUTS */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:60px;width:100%;align-items:center}
+.col{display:flex;flex-direction:column;gap:24px}
+.center-col{display:flex;flex-direction:column;align-items:center;text-align:center;gap:24px;width:100%}
+
+/* CARDS */
+.card{background:var(--surface);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:28px;
+  transition:.3s;position:relative;overflow:hidden}
+.card:hover{border-color:rgba(143,163,62,.3);transform:translateY(-2px)}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--gradient);opacity:0;transition:.3s}
+.card:hover::before{opacity:1}
+.card-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:12px}
+.card h3{margin-bottom:8px}
+.card p{color:var(--text2);font-size:.9rem;line-height:1.5}
+
+/* STATS */
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;width:100%}
+.stat{text-align:center;padding:24px;background:var(--surface);border-radius:16px;border:1px solid rgba(255,255,255,.06)}
+.stat-number{font-size:2.8rem;font-weight:800;line-height:1}
+.stat-label{font-size:.85rem;color:var(--text2);margin-top:8px}
+
+/* FEATURE GRID */
+.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;width:100%}
+
+/* SCREENSHOTS */
+.mockup{border-radius:12px;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,.5),0 0 40px var(--accent-glow);
+  border:1px solid rgba(255,255,255,.08);max-width:100%}
+.mockup img{width:100%;display:block}
+.mockup-small{max-width:460px}
+
+/* TIMELINE */
+.timeline{display:flex;flex-direction:column;gap:0;width:100%;max-width:800px}
+.timeline-item{display:flex;gap:20px;position:relative;padding-bottom:28px}
+.timeline-item:last-child{padding-bottom:0}
+.timeline-dot{width:14px;height:14px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:4px;
+  box-shadow:0 0 10px var(--accent-glow);position:relative;z-index:2}
+.timeline-item:not(:last-child) .timeline-dot::after{content:'';position:absolute;left:50%;top:14px;
+  width:2px;height:calc(100% + 14px);background:var(--surface2);transform:translateX(-50%)}
+.timeline-content h3{font-size:1rem;margin-bottom:4px}
+.timeline-content p{color:var(--text2);font-size:.85rem}
+.done{opacity:1}.done .timeline-dot{background:var(--accent-light)}
+.pending .timeline-dot{background:var(--surface2);border:2px solid var(--text2)}
+
+/* PRICING */
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;width:100%;max-width:900px}
+.pricing-card{background:var(--surface);border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:32px;text-align:center;transition:.3s}
+.pricing-card.featured{border-color:var(--accent-light);background:linear-gradient(180deg,rgba(75,83,32,.15),var(--surface));
+  transform:scale(1.05);box-shadow:0 0 40px var(--accent-glow)}
+.pricing-card h3{font-size:1.1rem;margin-bottom:16px}
+.pricing-price{font-size:2.5rem;font-weight:800;margin-bottom:4px}
+.pricing-period{font-size:.85rem;color:var(--text2);margin-bottom:20px}
+.pricing-features{list-style:none;text-align:left;display:flex;flex-direction:column;gap:10px}
+.pricing-features li{font-size:.85rem;color:var(--text2);display:flex;align-items:center;gap:8px}
+.pricing-features li::before{content:'✓';color:var(--accent-light);font-weight:700}
+
+/* CTA */
+.cta-btn{display:inline-flex;align-items:center;gap:10px;padding:16px 36px;border-radius:12px;
+  background:var(--gradient);color:#fff;font-size:1.05rem;font-weight:600;border:none;cursor:pointer;
+  text-decoration:none;transition:.3s;box-shadow:0 4px 20px var(--accent-glow)}
+.cta-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px var(--accent-glow)}
+.cta-outline{background:transparent;border:1px solid var(--accent-light);color:var(--accent-light);box-shadow:none}
+.cta-outline:hover{background:rgba(75,83,32,.15)}
+
+/* ANIMATIONS */
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+.float{animation:float 4s ease-in-out infinite}
+.slide.active .anim{animation:fadeUp .7s ease forwards}
+.slide.active .anim.d1{animation-delay:.1s;opacity:0}
+.slide.active .anim.d2{animation-delay:.2s;opacity:0}
+.slide.active .anim.d3{animation-delay:.3s;opacity:0}
+.slide.active .anim.d4{animation-delay:.4s;opacity:0}
+.slide.active .anim.d5{animation-delay:.5s;opacity:0}
+
+/* ICON BOXES */
+.icon-box{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px}
+.icon-green{background:rgba(75,83,32,.25);color:var(--accent-light)}
+.icon-purple{background:rgba(139,92,246,.15);color:#a78bfa}
+.icon-blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.icon-cyan{background:rgba(6,182,212,.15);color:#22d3ee}
+.icon-red{background:rgba(239,68,68,.15);color:#f87171}
+.icon-amber{background:rgba(245,158,11,.15);color:#fbbf24}
+
+/* MARKET BARS */
+.bar-wrap{display:flex;flex-direction:column;gap:6px}
+.bar-label{display:flex;justify-content:space-between;font-size:.85rem}
+.bar-track{height:8px;border-radius:4px;background:var(--surface2);overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;transition:width 1.5s ease}
+
+/* TEAM SECTION */
+.team-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;width:100%}
+.role-card{display:flex;gap:16px;align-items:center;background:var(--surface);border-radius:12px;padding:16px;border:1px solid rgba(255,255,255,.06)}
+.role-avatar{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- SLIDE 1: HERO -->
+<div class="slide active" id="slide-0">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div><div class="bg-glow g2"></div>
+  <div class="split">
+    <div class="col">
+      <span class="tag tag-accent anim d1">SaaS · LegalTech · IA</span>
+      <h1 class="anim d2">La gestión migratoria,<br><span class="gradient-text">reinventada.</span></h1>
+      <p class="subtitle anim d3">Digitaliza tu despacho de extranjería con triaje de documentos por IA, empaquetado automático de expedientes y gobernanza del equipo jurídico.</p>
+      <div style="display:flex;gap:12px" class="anim d4">
+        <button class="cta-btn" onclick="goTo(2)">Ver producto →</button>
+        <button class="cta-btn cta-outline" onclick="goTo(7)">Modelo de negocio</button>
+      </div>
+    </div>
+    <div class="col" style="align-items:center">
+      <div class="mockup float anim d3" style="max-width:420px">
+        <img src="assets/hero.png" alt="MigraFlow AI">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 2: PROBLEM -->
+<div class="slide" id="slide-1">
+  <div class="bg-grid"></div><div class="bg-glow g3"></div>
+  <div class="split">
+    <div class="col">
+      <span class="tag tag-purple anim d1">El problema</span>
+      <h2 class="anim d2">Las agencias de extranjería siguen <span style="color:var(--red)">atrapadas en papel</span></h2>
+      <div class="col anim d3" style="gap:16px">
+        <div style="display:flex;gap:14px;align-items:start">
+          <div class="icon-box icon-red">📄</div>
+          <div><h3>Gestión manual de expedientes</h3><p style="color:var(--text2);font-size:.9rem">Cada solicitud requiere 15-30 documentos que se revisan manualmente uno a uno</p></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:start">
+          <div class="icon-box icon-amber">⏱️</div>
+          <div><h3>Horas de trabajo repetitivo</h3><p style="color:var(--text2);font-size:.9rem">Verificar fechas, traducciones, apostillas — cada expediente consume 2-4 horas</p></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:start">
+          <div class="icon-box icon-purple">🔒</div>
+          <div><h3>Sin visibilidad para el cliente</h3><p style="color:var(--text2);font-size:.9rem">El cliente no sabe qué documentos faltan, en qué estado está su trámite</p></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:start">
+          <div class="icon-box icon-blue">💸</div>
+          <div><h3>Cobros difíciles de rastrear</h3><p style="color:var(--text2);font-size:.9rem">El control financiero se lleva en hojas de cálculo o no se lleva</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="col" style="align-items:center">
+      <div class="mockup anim d4" style="max-width:440px;border-radius:20px"><img src="assets/problem.png" alt="Problem"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: SOLUTION -->
+<div class="slide" id="slide-2">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div>
+  <div class="center-col">
+    <span class="tag tag-accent anim d1">La solución</span>
+    <h2 class="anim d2">Una plataforma integral para<br><span class="gradient-text">todo el ciclo migratorio</span></h2>
+    <p class="subtitle anim d3" style="max-width:700px">MigraFlow conecta al despacho, el equipo jurídico y el cliente en un solo lugar — con inteligencia artificial que revisa documentos automáticamente.</p>
+    <div class="feature-grid anim d4" style="max-width:960px;margin-top:16px">
+      <div class="card">
+        <div class="icon-box icon-green" style="margin-bottom:12px">🤖</div>
+        <h3>Triaje IA de documentos</h3>
+        <p>OCR con Google Vision. Detecta fechas vencidas, keywords faltantes, y más — al instante.</p>
+      </div>
+      <div class="card">
+        <div class="icon-box icon-purple" style="margin-bottom:12px">📦</div>
+        <h3>Magic Button</h3>
+        <p>Un clic genera el paquete PDF completo con portada profesional, listo para presentar.</p>
+      </div>
+      <div class="card">
+        <div class="icon-box icon-blue" style="margin-bottom:12px">👥</div>
+        <h3>Portal del cliente</h3>
+        <p>El cliente sube documentos, ve su progreso y recibe avisos — sin llamadas al despacho.</p>
+      </div>
+      <div class="card">
+        <div class="icon-box icon-cyan" style="margin-bottom:12px">⚖️</div>
+        <h3>Gobernanza jurídica</h3>
+        <p>Asigna equipos, notas internas inmutables, y auditoría completa de cada acción.</p>
+      </div>
+      <div class="card">
+        <div class="icon-box icon-amber" style="margin-bottom:12px">💰</div>
+        <h3>Control financiero</h3>
+        <p>Hitos de pago por expediente. Bloqueo automático de generación por deuda activa.</p>
+      </div>
+      <div class="card">
+        <div class="icon-box icon-red" style="margin-bottom:12px">🛡️</div>
+        <h3>Multi-tenant & RGPD</h3>
+        <p>Cada agencia aislada. El superadmin no accede a datos de clientes. Reglas granulares.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 4: PRODUCT - DASHBOARD -->
+<div class="slide" id="slide-3">
+  <div class="bg-grid"></div><div class="bg-glow g2"></div>
+  <div class="split">
+    <div class="col">
+      <span class="tag tag-accent anim d1">Producto</span>
+      <h2 class="anim d2">Panel de la agencia</h2>
+      <p class="subtitle anim d3">Vista centralizada de todos los expedientes con KPIs en tiempo real, filtros avanzados y exportación a CSV.</p>
+      <div class="col anim d4" style="gap:12px">
+        <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--accent-light);font-size:1.2rem">✓</span><span>18 expedientes gestionados simultáneamente</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--accent-light);font-size:1.2rem">✓</span><span>Filtros por estado, tipo de proceso y gestor</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--accent-light);font-size:1.2rem">✓</span><span>Widget de deuda activa con alertas visuales</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--accent-light);font-size:1.2rem">✓</span><span>Alta de clientes con wizard de 3 pasos</span></div>
+      </div>
+    </div>
+    <div class="col anim d3" style="align-items:center">
+      <div class="mockup" style="max-width:520px"><img src="assets/dashboard.png" alt="Dashboard"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 5: PRODUCT - CASE -->
+<div class="slide" id="slide-4">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div>
+  <div class="split" style="grid-template-columns:1fr 1fr">
+    <div class="col anim d2" style="align-items:center">
+      <div class="mockup" style="max-width:520px"><img src="assets/case_detail.png" alt="Case Detail"></div>
+    </div>
+    <div class="col">
+      <span class="tag tag-accent anim d1">Expediente</span>
+      <h2 class="anim d2">Gestión completa del caso</h2>
+      <p class="subtitle anim d3">Tres tabs especializados en una vista de dos columnas que centraliza toda la información del expediente.</p>
+      <div class="col anim d4" style="gap:10px">
+        <div class="card" style="padding:16px;display:flex;gap:14px;align-items:center">
+          <div class="icon-box icon-green" style="width:40px;height:40px;font-size:18px;flex-shrink:0">📋</div>
+          <div><h3 style="font-size:.95rem">Checklist</h3><p style="font-size:.8rem">Requisitos con drag-and-drop, avisos IA, Magic Button</p></div>
+        </div>
+        <div class="card" style="padding:16px;display:flex;gap:14px;align-items:center">
+          <div class="icon-box icon-purple" style="width:40px;height:40px;font-size:18px;flex-shrink:0">💬</div>
+          <div><h3 style="font-size:.95rem">Notas internas</h3><p style="font-size:.8rem">Chat de hilo en tiempo real, inmutable, invisible al cliente</p></div>
+        </div>
+        <div class="card" style="padding:16px;display:flex;gap:14px;align-items:center">
+          <div class="icon-box icon-amber" style="width:40px;height:40px;font-size:18px;flex-shrink:0">💰</div>
+          <div><h3 style="font-size:.95rem">Facturación</h3><p style="font-size:.8rem">Hitos de pago, control de deuda, bloqueo automático</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 6: HOW IT WORKS -->
+<div class="slide" id="slide-5">
+  <div class="bg-grid"></div><div class="bg-glow g3"></div>
+  <div class="center-col">
+    <span class="tag tag-accent anim d1">¿Cómo funciona?</span>
+    <h2 class="anim d2">De caos de papel a <span class="gradient-text">expediente digital</span> en minutos</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px;width:100%;max-width:960px;margin-top:20px" class="anim d3">
+      <div style="text-align:center;position:relative">
+        <div class="icon-box icon-green" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px">1️⃣</div>
+        <h3 style="font-size:1rem;margin-bottom:8px">Alta del cliente</h3>
+        <p style="color:var(--text2);font-size:.82rem;line-height:1.5">Wizard de 3 pasos: datos personales, pasaporte y tipo de trámite</p>
+      </div>
+      <div style="text-align:center">
+        <div class="icon-box icon-purple" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px">2️⃣</div>
+        <h3 style="font-size:1rem;margin-bottom:8px">Subida de documentos</h3>
+        <p style="color:var(--text2);font-size:.82rem;line-height:1.5">El cliente sube docs desde su portal. Drag-and-drop con instrucciones claras</p>
+      </div>
+      <div style="text-align:center">
+        <div class="icon-box icon-blue" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px">3️⃣</div>
+        <h3 style="font-size:1rem;margin-bottom:8px">Triaje IA automático</h3>
+        <p style="color:var(--text2);font-size:.82rem;line-height:1.5">OCR analiza cada documento: fechas, keywords, apostillas — sin intervención humana</p>
+      </div>
+      <div style="text-align:center">
+        <div class="icon-box icon-cyan" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px">4️⃣</div>
+        <h3 style="font-size:1rem;margin-bottom:8px">Magic Button</h3>
+        <p style="color:var(--text2);font-size:.82rem;line-height:1.5">Un clic empaqueta todo en un PDF profesional listo para la administración</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 7: MARKET -->
+<div class="slide" id="slide-6">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div><div class="bg-glow g2"></div>
+  <div class="split">
+    <div class="col">
+      <span class="tag tag-accent anim d1">Oportunidad de mercado</span>
+      <h2 class="anim d2">Un mercado en <span class="gradient-text">crecimiento explosivo</span></h2>
+      <p class="subtitle anim d3">España recibió 1.2M de solicitudes de permisos de residencia en 2025. Las agencias de extranjería están desbordadas y digitalmente rezagadas.</p>
+      <div class="stat-grid anim d4" style="grid-template-columns:repeat(2,1fr)">
+        <div class="stat"><div class="stat-number gradient-text">5.000+</div><div class="stat-label">Agencias de extranjería en España</div></div>
+        <div class="stat"><div class="stat-number gradient-text">1.2M</div><div class="stat-label">Solicitudes de residencia / año</div></div>
+        <div class="stat"><div class="stat-number gradient-text">&lt;5%</div><div class="stat-label">Usan software especializado</div></div>
+        <div class="stat"><div class="stat-number gradient-text">€340M</div><div class="stat-label">TAM estimado en servicios legales migratorios</div></div>
+      </div>
+    </div>
+    <div class="col anim d3" style="gap:20px">
+      <h3 style="color:var(--text2)">Competencia directa</h3>
+      <div class="bar-wrap"><div class="bar-label"><span>Hojas de cálculo / Email</span><span style="color:var(--red)">72%</span></div><div class="bar-track"><div class="bar-fill" style="width:72%;background:var(--red)"></div></div></div>
+      <div class="bar-wrap"><div class="bar-label"><span>ERPs genéricos (no migratorios)</span><span style="color:var(--amber,#f59e0b)">18%</span></div><div class="bar-track"><div class="bar-fill" style="width:18%;background:#f59e0b"></div></div></div>
+      <div class="bar-wrap"><div class="bar-label"><span>Software especializado</span><span style="color:var(--blue)">7%</span></div><div class="bar-track"><div class="bar-fill" style="width:7%;background:var(--blue)"></div></div></div>
+      <div class="bar-wrap"><div class="bar-label"><span>Con IA integrada</span><span style="color:var(--accent-light)">≈ 0%</span></div><div class="bar-track"><div class="bar-fill" style="width:2%;background:var(--accent-light)"></div></div></div>
+      <div class="card anim d5" style="margin-top:8px;background:linear-gradient(135deg,rgba(75,83,32,.2),var(--surface))">
+        <p style="font-size:.9rem;color:var(--text2)">💡 <strong style="color:var(--text)">MigraFlow es la única solución</strong> que combina gestión documental, triaje por IA y portal de cliente en un mismo producto vertical.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 8: BUSINESS MODEL -->
+<div class="slide" id="slide-7">
+  <div class="bg-grid"></div><div class="bg-glow g3"></div>
+  <div class="center-col">
+    <span class="tag tag-accent anim d1">Modelo de negocio</span>
+    <h2 class="anim d2">SaaS por <span class="gradient-text">suscripción mensual</span></h2>
+    <p class="subtitle anim d3">Pricing transparente y escalable. Cada agencia es un tenant aislado con sus datos protegidos.</p>
+    <div class="pricing-grid anim d4" style="margin-top:12px">
+      <div class="pricing-card">
+        <h3>Básico</h3>
+        <div class="pricing-price">€49</div>
+        <div class="pricing-period">/ mes por agencia</div>
+        <ul class="pricing-features">
+          <li>Hasta 50 expedientes activos</li>
+          <li>2 usuarios del equipo</li>
+          <li>Portal del cliente</li>
+          <li>Checklist de documentos</li>
+          <li>Empaquetado PDF</li>
+        </ul>
+      </div>
+      <div class="pricing-card featured">
+        <h3>Pro ⭐</h3>
+        <div class="pricing-price gradient-text">€129</div>
+        <div class="pricing-period">/ mes por agencia</div>
+        <ul class="pricing-features">
+          <li>Expedientes ilimitados</li>
+          <li>Usuarios ilimitados</li>
+          <li>Triaje IA con OCR</li>
+          <li>Notas internas y auditoría</li>
+          <li>Control financiero</li>
+          <li>Soporte prioritario</li>
+        </ul>
+      </div>
+      <div class="pricing-card">
+        <h3>Enterprise</h3>
+        <div class="pricing-price">Custom</div>
+        <div class="pricing-period">Contactar equipo</div>
+        <ul class="pricing-features">
+          <li>Multi-oficina</li>
+          <li>API de integración</li>
+          <li>SLA garantizado</li>
+          <li>Onboarding dedicado</li>
+          <li>Personalización de marca</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 9: ROADMAP -->
+<div class="slide" id="slide-8">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div>
+  <div class="split">
+    <div class="col">
+      <span class="tag tag-accent anim d1">Roadmap</span>
+      <h2 class="anim d2">Estado del desarrollo</h2>
+      <p class="subtitle anim d3">7 de 8 fases completadas. El producto tiene funcionalidad core completa y está desplegado en producción.</p>
+      <div class="stat-grid anim d4" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat"><div class="stat-number" style="color:var(--accent-light)">87%</div><div class="stat-label">Roadmap completado</div></div>
+        <div class="stat"><div class="stat-number" style="color:var(--cyan)">7.6K</div><div class="stat-label">Líneas de código</div></div>
+        <div class="stat"><div class="stat-number" style="color:var(--purple)">3</div><div class="stat-label">Cloud Functions</div></div>
+      </div>
+    </div>
+    <div class="col anim d3">
+      <div class="timeline">
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 1 — Core Backend</h3><p>Auth, RBAC, OCR, Magic Button, Firestore rules</p></div></div>
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 2 — Panel SuperAdmin</h3><p>Dashboard stats, CRUD agencias, constructor de plantillas</p></div></div>
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 3-4 — Panel Agencia</h3><p>Expedientes, checklist, wizard, CSV, timeline</p></div></div>
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 5 — Portal Cliente</h3><p>Dashboard, upload drag-and-drop, progreso en vivo</p></div></div>
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 6 — Gobernanza</h3><p>Equipos colaborativos, notas internas, audit logs</p></div></div>
+        <div class="timeline-item done"><div class="timeline-dot"></div><div class="timeline-content"><h3>✅ Fase 7 — Control Financiero</h3><p>Billing, hitos de pago, bloqueo por deuda</p></div></div>
+        <div class="timeline-item pending"><div class="timeline-dot"></div><div class="timeline-content"><h3>🔲 Fase 8 — Analytics</h3><p>BI dashboard, métricas, rendimiento del equipo</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 10: CTA -->
+<div class="slide" id="slide-9">
+  <div class="bg-grid"></div><div class="bg-glow g1"></div><div class="bg-glow g2"></div><div class="bg-glow g3"></div>
+  <div class="center-col">
+    <span class="tag tag-accent anim d1">Próximos pasos</span>
+    <h1 class="anim d2" style="max-width:800px">Digitalicemos juntos la <span class="gradient-text">gestión migratoria</span></h1>
+    <p class="subtitle anim d3" style="max-width:650px">MigraFlow está listo para su primera ronda de clientes piloto. Buscamos agencias dispuestas a innovar e inversores que crean en la transformación digital del sector legal migratorio.</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:700px;width:100%;margin-top:20px" class="anim d4">
+      <div class="card" style="text-align:center"><div style="font-size:2rem;margin-bottom:8px">🏢</div><h3 style="font-size:.95rem">Piloto gratuito</h3><p style="font-size:.82rem">3 meses gratis para las primeras 10 agencias</p></div>
+      <div class="card" style="text-align:center"><div style="font-size:2rem;margin-bottom:8px">📈</div><h3 style="font-size:.95rem">Inversión</h3><p style="font-size:.82rem">Ronda pre-seed para acelerar GTM y equipo</p></div>
+      <div class="card" style="text-align:center"><div style="font-size:2rem;margin-bottom:8px">🤝</div><h3 style="font-size:.95rem">Partnership</h3><p style="font-size:.82rem">Integraciones con colegios de abogados</p></div>
+    </div>
+    <div style="display:flex;gap:14px;margin-top:24px" class="anim d5">
+      <a href="mailto:info@migraflow.app" class="cta-btn">✉️ Contactar</a>
+      <button class="cta-btn cta-outline" onclick="goTo(0)">← Volver al inicio</button>
+    </div>
+    <p class="anim d5" style="color:var(--text2);font-size:.8rem;margin-top:32px">MigraFlow © 2026 — Todos los derechos reservados</p>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<!-- NAV -->
+<div class="slide-counter"><span id="current">01</span> / <span id="total">10</span></div>
+<div class="nav" id="nav"></div>
+<div class="nav-arrows">
+  <button onclick="prev()" aria-label="Anterior">‹</button>
+  <button onclick="next()" aria-label="Siguiente">›</button>
+</div>
+
+<script>
+const slides=document.querySelectorAll('.slide');
+const nav=document.getElementById('nav');
+const total=slides.length;
+let current=0;
+let transitioning=false;
+
+// Build nav dots
+slides.forEach((_,i)=>{
+  const d=document.createElement('button');
+  d.className='nav-dot'+(i===0?' active':'');
+  d.onclick=()=>goTo(i);
+  nav.appendChild(d);
+});
+const dots=nav.querySelectorAll('.nav-dot');
+
+function goTo(n){
+  if(n===current||transitioning)return;
+  transitioning=true;
+  const dir=n>current?1:-1;
+  // Exit current slide
+  slides[current].classList.remove('active');
+  if(dir>0) slides[current].classList.add('prev');
+  slides[current].style.transform=dir>0?'translateX(-60px)':'translateX(60px)';
+  dots[current].classList.remove('active');
+  // Pre-position incoming slide on the correct side (no transition)
+  const incoming=slides[n];
+  incoming.style.transition='none';
+  incoming.style.transform=dir>0?'translateX(60px)':'translateX(-60px)';
+  incoming.offsetHeight; // force reflow
+  // Re-enable transition and animate in
+  incoming.style.transition='';
+  current=n;
+  incoming.classList.remove('prev');
+  incoming.classList.add('active');
+  incoming.style.transform='';
+  dots[current].classList.add('active');
+  document.getElementById('current').textContent=String(current+1).padStart(2,'0');
+  setTimeout(()=>{
+    slides.forEach((s,i)=>{if(i!==current){s.classList.remove('active','prev');s.style.transform=''}});
+    transitioning=false;
+  },650);
+}
+
+function next(){goTo(Math.min(current+1,total-1))}
+function prev(){goTo(Math.max(current-1,0))}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' ')next();
+  if(e.key==='ArrowLeft')prev();
+});
+
+// Touch
+let tx=0;
+document.addEventListener('touchstart',e=>{tx=e.touches[0].clientX});
+document.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-tx;
+  if(Math.abs(dx)>50){dx<0?next():prev()}
+});
+</script>
+</body>
+</html>

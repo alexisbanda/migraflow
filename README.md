@@ -42,14 +42,17 @@ migraflow/
 │   │   └── AuthContext.jsx          # AuthProvider, useAuth, login, logout
 │   ├── hooks/
 │   │   ├── useGeneratePackage.js    # Hook para el Magic Button
-│   │   └── useAgencies.js          # onSnapshot agencies + CRUD
+│   │   ├── useAgencies.js          # onSnapshot agencies + CRUD
+│   │   └── useBilling.js           # Control financiero: billing + milestones + denormalización
 │   ├── lib/
 │   │   └── firebase.js             # Init Auth, Firestore, Storage, Functions
 │   ├── pages/
 │   │   ├── auth/                   # LoginPage, AuthCallbackPage
 │   │   ├── clients/                # NewClientPage (wizard de alta)
-│   │   ├── cases/                  # CasePage (Fase 6: tabs + equipo + notas internas)
-│   │   ├── dashboard/              # DashboardPage (lista de expedientes)
+│   │   ├── cases/
+│   │   │   ├── CasePage.jsx        # Expediente: 3 tabs (Checklist / Notas / Facturación) + sidebar
+│   │   │   └── BillingTab.jsx      # Tab financiero: summary cards, hitos, bloqueo
+│   │   ├── dashboard/              # DashboardPage (lista + stats + widget de deuda)
 │   │   ├── portal/
 │   │   │   ├── ClientPortalPage.jsx       # Layout + PortalCtx provider
 │   │   │   ├── PortalDashboardPage.jsx    # Resumen de expedientes
@@ -67,7 +70,7 @@ migraflow/
 │   │   │   ├── admin.js                    # Firebase Admin SDK (idempotente)
 │   │   │   └── errors.js                   # throwFn, assertRole, assertSuperAdmin
 │   │   ├── processDocumentOCR.js           # Trigger Storage: triaje IA
-│   │   ├── generateMigratoryPackage.js     # onCall: Magic Button (PDF) + audit log
+│   │   ├── generateMigratoryPackage.js     # onCall: Magic Button (PDF) + validación deuda + audit log
 │   │   └── createAgencyAdmin.js            # onCall: crea usuario agency_admin
 │   └── index.js
 ├── scripts/
@@ -105,6 +108,7 @@ migraflow/
   assignees[]  { uid, internal_role, name }      ← Fase 6 (reemplaza assigned_lawyer_id)
   assignee_uids[]                                 ← campo plano para reglas y queries
   assigned_lawyer_id                              ← legacy (backward compat)
+  billing_status                                  ← Fase 7: denormalizado desde /billing para queries
   last_package { file_url, file_size_mb, generated_at }, timeline[]
 
 /cases/{caseId}/requirements/{reqId}
@@ -116,6 +120,16 @@ migraflow/
 /cases/{caseId}/internal_notes/{noteId}          ← Fase 6
   author_uid, author_name, content, created_at, attachments[]
   — El rol 'client' NUNCA puede leer esta subcolección. Notas inmutables.
+
+/cases/{caseId}/billing/{billingId}              ← Fase 7
+  total_amount, paid_amount, currency, payment_status,
+  block_generation_on_debt, created_at
+  — payment_status: 'pending' | 'partial' | 'paid' | 'debt'
+  — Escritura: agency_admin y lawyer. Lectura: también client.
+
+/cases/{caseId}/billing_milestones/{milestoneId} ← Fase 7
+  description, amount, due_date, status ('pending' | 'paid'), paid_at, created_at
+  — Escritura: agency_admin y lawyer. Lectura: también client.
 
 /global_templates/{templateId}
   name, case_type, estimated_resolution_days,
@@ -146,8 +160,8 @@ migraflow/
 | Ruta | Rol | Descripción |
 |------|-----|-------------|
 | `/login` | Público | Login con email y contraseña |
-| `/dashboard` | agency_admin, lawyer | Lista de expedientes con filtros y stats |
-| `/cases/:caseId` | agency_admin, lawyer | Expediente: tabs (Checklist / Notas internas), equipo asignado, Magic Button |
+| `/dashboard` | agency_admin, lawyer | Lista de expedientes con filtros, stats y widget de deuda activa |
+| `/cases/:caseId` | agency_admin, lawyer | Expediente: tabs (Checklist / Notas internas / Facturación), equipo asignado, Magic Button |
 | `/clients/new` | agency_admin, lawyer | Wizard de alta de cliente (3 pasos) |
 | `/portal` | client | Dashboard: tarjetas de expediente con progreso y acciones urgentes |
 | `/portal/caso/:caseId` | client | Detalle: requisitos, línea de tiempo, descarga de paquete |
@@ -177,7 +191,8 @@ migraflow/
 ### `generateMigratoryPackage` (Magic Button)
 - **Trigger:** `onCall` — roles: `agency_admin`, `lawyer`
 - **Payload:** `{ caseId, agencyId }`
-- **Proceso:** Verifica permisos → descarga PDFs validados → une con pdf-lib → portada dark → sube a Storage → URL firmada 7 días
+- **Proceso:** Verifica permisos → **valida deuda** → descarga PDFs validados → une con pdf-lib → portada dark → sube a Storage → URL firmada 7 días
+- **Validación de deuda (Fase 7):** lee `/cases/{caseId}/billing`. Si `payment_status === 'debt'` y `block_generation_on_debt !== false`, lanza `failed-precondition`
 - **Check de asignación (Fase 6):** comprueba `assignee_uids` (nuevo) y `assigned_lawyer_id` (legacy) para compatibilidad
 - **Audit log (Fase 6):** escribe en `/agencies/{agencyId}/audit_logs` con `action: 'GENERATE_PACKAGE'` al finalizar con éxito
 - **Output:** `{ status, file_url, file_size_mb, total_docs }`
@@ -191,15 +206,22 @@ migraflow/
 
 ---
 
-## Panel de Agencia (CasePage — Fase 6)
+## Panel de Agencia (CasePage — Fases 6 y 7)
 
-La `CasePage` (`/cases/:caseId`) es la vista central del despacho para gestionar un expediente. Tras la Fase 6 adopta un layout de dos columnas:
+La `CasePage` (`/cases/:caseId`) es la vista central del despacho para gestionar un expediente. Layout de dos columnas:
 
 ### Columna principal — Tabs
 | Tab | Visible para | Contenido |
 |-----|-------------|-----------|
 | **Checklist** | agency_admin, lawyer, client | Lista de requisitos con accordion, upload drag-and-drop, avisos IA y Magic Button |
 | **Notas internas** | agency_admin, lawyer | Chat de hilo en tiempo real (`onSnapshot`). Inmutables. El rol `client` no ve este tab |
+| **Facturación** | agency_admin, lawyer | Resumen financiero, hitos de pago, registro de cobros, control de bloqueo |
+
+### Magic Button — Bloqueo financiero (Fase 7)
+El botón "Generar paquete" se deshabilita automáticamente si `billing.payment_status === 'debt'` y `billing.block_generation_on_debt` está activo. Se muestra:
+- Un banner rojo con icono de candado sobre el botón
+- El botón cambia su icono y texto a "Bloqueado"
+- La Cloud Function `generateMigratoryPackage` también valida y rechaza la llamada en el servidor
 
 ### Sidebar
 - **Widget "Equipo":** lista de `assignees` con rol (`Abogado principal / Paralegal / Socio`). `agency_admin` puede añadir y quitar miembros. Al guardar escribe tanto `assignees[]` (objetos con `uid`, `internal_role`, `name`) como `assignee_uids[]` (array plano para las Security Rules)
@@ -419,16 +441,17 @@ Variables de entorno en Netlify: **Site settings → Environment variables** →
 - [x] **CasePage rediseñada:** layout 2 columnas (main + sidebar `w-72`). Tab "Checklist" + tab "Notas internas". Widget "Equipo" en sidebar con add/remove de miembros
 - [x] **Firestore rules actualizadas:** `assignedToCase()` comprueba `assignee_uids` + `assigned_lawyer_id`; nuevas reglas para `internal_notes` y `audit_logs`
 
-### 🔲 Fase 7 — Control Financiero y Bloqueo de Hitos
-- [ ] Subcolección `/cases/{caseId}/billing`: `total_amount`, `paid_amount`, `currency`, `payment_status`, `next_due_date`
-- [ ] Subcolección `/cases/{caseId}/billing_milestones`: hitos de pago con descripción, importe y fecha
-- [ ] Cloud Function `generateMigratoryPackage`: validación de pago (`block_generation_on_debt`)
-- [ ] CasePage: tab "Facturación" con registro manual de pagos y progreso financiero
-- [ ] Magic Button deshabilitado con candado si hay deuda pendiente
-- [ ] DashboardPage: widget de expedientes con pagos vencidos
+### ✅ Fase 7 — Control Financiero y Bloqueo de Hitos
+- [x] Subcolección `/cases/{caseId}/billing`: `total_amount`, `paid_amount`, `currency`, `payment_status`, `block_generation_on_debt`
+- [x] Subcolección `/cases/{caseId}/billing_milestones`: hitos de pago con descripción, importe, fecha y estado
+- [x] Hook `useBilling`: `initBilling`, `updateBilling`, `addMilestone`, `recordPayment`. Denormaliza `billing_status` en `cases/{caseId}` para queries eficientes
+- [x] Cloud Function `generateMigratoryPackage`: validación de deuda antes de generar (paso 2.5)
+- [x] CasePage: tab "Facturación" (staff) — summary cards (total/pagado/pendiente), hitos, toggle deuda/bloqueo
+- [x] Magic Button: banner rojo + icono candado + deshabilitado si `billing_status === 'debt'`
+- [x] DashboardPage: `OverdueWidget` — banner rojo con lista de expedientes en deuda, visible entre stats y filtros
 
 ### 🔲 Fase 8 — Inteligencia de Negocio (Analytics)
-- [ ] Colección `/agencies/{agencyId}/analytics/current_stats` con documento de métricas agregadas
+- [ ] Colección `/agencies/{agencyId}/analytics/current_stats` con documento de métricas agregadas  
 - [ ] Cloud Function programada (`onSchedule`, 2 AM) que recalcula: distribución por tipo, tiempo medio de resolución, cuellos de botella por requisito, productividad por abogado
 - [ ] Ruta `/dashboard/analytics` visible solo para `agency_admin`
 - [ ] Gráfico de pastel: distribución de expedientes por tipo
