@@ -150,6 +150,59 @@ h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
 .team-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;width:100%}
 .role-card{display:flex;gap:16px;align-items:center;background:var(--surface);border-radius:12px;padding:16px;border:1px solid rgba(255,255,255,.06)}
 .role-avatar{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px}
+
+/* RESPONSIVE */
+.slide{overflow-y:auto;overflow-x:hidden;}
+.slide::-webkit-scrollbar{display:none;}
+
+@media (max-width: 900px) {
+  .slide { 
+    align-items: flex-start; 
+    justify-content: flex-start; 
+    padding: 60px 24px 100px 24px; 
+    flex-direction: column;
+  }
+  .split { grid-template-columns: 1fr !important; gap: 40px; }
+  .mockup { max-width: 100% !important; margin: 0 auto; }
+  .stat-grid { grid-template-columns: 1fr 1fr !important; gap: 16px; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; gap: 24px; }
+  
+  [style*="grid-template-columns:repeat(4,1fr)"] { grid-template-columns: 1fr 1fr !important; gap: 24px !important; }
+  [style*="grid-template-columns:repeat(3,1fr)"] { grid-template-columns: 1fr !important; }
+  .nav-arrows { bottom: 16px; right: 16px; }
+  .nav { bottom: 16px; }
+  .timeline { padding-left: 10px; }
+}
+
+@media (max-width: 500px) {
+  h1 { font-size: 2.1rem !important; }
+  h2 { font-size: 1.7rem !important; }
+
+  .stat-grid { grid-template-columns: 1fr !important; }
+  [style*="grid-template-columns:repeat(4,1fr)"] { grid-template-columns: 1fr !important; }
+  
+  /* Botones 100% width en móvil */
+  div[style*="display:flex;gap:12px"], div[style*="display:flex;gap:14px;margin-top:24px"] {
+    flex-direction: column !important;
+    width: 100%;
+  }
+  .cta-btn { width: 100% !important; justify-content: center; }
+  
+  /* Widget contacto en móvil */
+  div[style*="justify-content:space-between;align-items:center"] {
+    flex-direction: column !important;
+    gap: 16px;
+    text-align: center;
+  }
+  div[style*="display:flex;gap:16px;align-items:center;"] {
+    flex-direction: column !important;
+    text-align: center;
+  }
+  div[style*="text-align:left;"] {
+    text-align: center !important;
+  }
+}
 </style>
 </head>
 <body>
@@ -368,7 +421,7 @@ h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
     <div class="pricing-grid anim d4" style="margin-top:12px">
       <div class="pricing-card">
         <h3>Básico</h3>
-        <a href="mailto:info@migraflow.app" class="cta-btn cta-outline" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
+        <a href="mailto:christian.alexis.banda@gmail.com" class="cta-btn cta-outline" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
         <ul class="pricing-features">
           <li>Gestión de expedientes estandarizada</li>
           <li>Acceso al portal web para el equipo inicial</li>
@@ -379,7 +432,7 @@ h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
       </div>
       <div class="pricing-card featured">
         <h3>Pro ⭐</h3>
-        <a href="mailto:info@migraflow.app" class="cta-btn" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
+        <a href="mailto:christian.alexis.banda@gmail.com" class="cta-btn" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
         <ul class="pricing-features">
           <li>Volumen y crecimiento de expedientes sin restricciones</li>
           <li>Gestión integral sin límites de usuarios en el equipo</li>
@@ -391,7 +444,7 @@ h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
       </div>
       <div class="pricing-card">
         <h3>Enterprise</h3>
-        <a href="mailto:info@migraflow.app" class="cta-btn cta-outline" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
+        <a href="mailto:christian.alexis.banda@gmail.com" class="cta-btn cta-outline" style="padding:10px 20px;font-size:.9rem;margin-bottom:20px;display:inline-flex;width:100%;justify-content:center">Contactar ventas</a>
         <ul class="pricing-features">
           <li>Administración centralizada y segura de múltiples sucursales</li>
           <li>Agencias conectadas a otros sistemas corporativos mediante API</li>
@@ -456,8 +509,9 @@ h3{font-size:1.3rem;font-weight:600;letter-spacing:-0.3px}
       <a href="/" target="_blank" class="cta-btn cta-outline" style="padding:10px 20px;font-size:.9rem">Abrir App</a>
     </div>
 
-    <div style="display:flex;gap:14px;margin-top:24px" class="anim d5">
-      <a href="mailto:info@migraflow.app" class="cta-btn">✉️ Contactar</a>
+    <div style="display:flex;gap:14px;margin-top:24px;flex-wrap:wrap;justify-content:center" class="anim d5">
+      <a href="mailto:christian.alexis.banda@gmail.com" class="cta-btn">✉️ Contactar</a>
+      <a href="https://wa.me/34603138276" target="_blank" class="cta-btn" style="background:#25D366;border:none;color:#fff;box-shadow:0 4px 20px rgba(37,211,102,0.3)">💬 WhatsApp</a>
       <button class="cta-btn cta-outline" onclick="goTo(0)">← Volver al inicio</button>
     </div>
     <p class="anim d5" style="color:var(--text2);font-size:.8rem;margin-top:32px">MigraFlow © 2026 — Todos los derechos reservados</p>
